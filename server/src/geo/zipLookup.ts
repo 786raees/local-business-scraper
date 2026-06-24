@@ -27,8 +27,9 @@ export async function lookupZips(
 
   let zips: string[] = []
   try {
-    // Zippopotam by country+state+city.
-    const url = `https://api.zippopotam.us/${country}/${encodeURIComponent(state)}/${encodeURIComponent(city)}`
+    // Zippopotam expects a lowercase 2-letter country code and state abbreviation,
+    // e.g. https://api.zippopotam.us/us/fl/miami
+    const url = `https://api.zippopotam.us/${country.toLowerCase()}/${encodeURIComponent(state.toLowerCase())}/${encodeURIComponent(city)}`
     const data = await fetchJson(url)
     const places = (data?.places ?? []) as Array<Record<string, string>>
     zips = places.map((p) => p['post code']).filter(Boolean)

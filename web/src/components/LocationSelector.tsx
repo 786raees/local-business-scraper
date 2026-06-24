@@ -32,7 +32,7 @@ export function LocationSelector() {
   useEffect(() => {
     if (!country || !state || !city) { setZips([]); return }
     setZipLoading(true)
-    api.getZips(country.name, state.name, city).then(setZips).finally(() => setZipLoading(false))
+    api.getZips(country.code, state.code, city).then(setZips).finally(() => setZipLoading(false))
     setZip(ALL_ZIPS)
   }, [city])
 
