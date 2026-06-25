@@ -2,13 +2,27 @@ import { useStore } from '../lib/store'
 import { api } from '../lib/api'
 
 export function TopBar() {
-  const { keywords, locations, settings, total, progress, running, setRunning, reset } = useStore()
+  const { keywords, locations, settings, total, progress, queue, running, setRunning, reset } = useStore()
   const start = async () => {
     reset(); setRunning(true)
     await api.startJob({ keywords, locations, settings })
   }
   const stop = async () => { await api.stopJob(); setRunning(false) }
-  const pct = progress.total ? Math.round((progress.done / progress.total) * 100) : 0
+  const clear = async () => {
+    if (!window.confirm('Clear all scraped data? This permanently deletes every stored record.')) return
+    await api.clearResults()
+    reset()
+  }
+
+  // Record-level progress: completed tasks count fully, plus the fraction of the
+  // in-progress task's records against maxResults. Reaches 100% when all tasks finish.
+  const finishedRecords = queue
+    .filter((q) => q.status === 'done' || q.status === 'error')
+    .reduce((sum, q) => sum + q.count, 0)
+  const currentRecords = Math.max(0, total - finishedRecords)
+  const currentFraction = settings.maxResults > 0 ? Math.min(1, currentRecords / settings.maxResults) : 0
+  const tasksProgress = progress.done + (progress.done < progress.total ? currentFraction : 0)
+  const pct = progress.total ? Math.min(100, Math.round((tasksProgress / progress.total) * 100)) : 0
   const canStart = !running && keywords.length > 0 && locations.length > 0
 
   return (
@@ -67,6 +81,15 @@ export function TopBar() {
         >
           Export CSV
         </a>
+        <button
+          onClick={clear}
+          disabled={!total || running}
+          title={running ? 'Stop the survey before clearing' : 'Delete all stored records'}
+          className="rounded-md border border-line px-3 py-1.5 text-sm font-500 text-parchment transition
+                     hover:border-rose hover:text-rose disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Clear data
+        </button>
       </div>
     </header>
   )

@@ -19,6 +19,8 @@ function makeDeps() {
       page: (offset: number, limit: number) => rows.slice(offset, offset + limit),
       count: () => rows.length,
       *iterate() { yield rows },
+      cleared: false,
+      clear() { this.cleared = true },
     },
     startJob: () => {}, stopJob: () => {},
   }
@@ -37,6 +39,13 @@ describe('routes', () => {
     expect(res.body.total).toBe(2)
     expect(res.body.rows).toHaveLength(1)
     expect(res.body.rows[0].name).toBe('Acme')
+  })
+
+  it('POST /api/results/clear invokes clear', async () => {
+    const deps = makeDeps()
+    const res = await request(createApp(deps as any)).post('/api/results/clear')
+    expect(res.status).toBe(200)
+    expect((deps.results as any).cleared).toBe(true)
   })
 
   it('GET /api/export/csv streams a csv attachment with header + rows', async () => {

@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module'
-import { Business } from '../types.js'
+import { Business, ResultQuery } from '../types.js'
 
 // node:sqlite is a runtime builtin; load via require so bundlers (vitest/vite)
 // don't try to statically resolve it.
@@ -10,6 +10,11 @@ const COLUMNS: (keyof Business)[] = [
   'name', 'address', 'phone', 'website', 'rating', 'reviewCount', 'priceLevel',
   'category', 'hours', 'email', 'mapsUrl', 'keyword', 'location',
 ]
+
+// Columns the client is allowed to sort by (prevents SQL injection via sortBy).
+const SORTABLE = new Set<string>([
+  'name', 'rating', 'reviewCount', 'category', 'address', 'phone', 'email', 'location',
+])
 
 /**
  * Disk-backed results store. Holds every scraped row so the frontend never
@@ -46,25 +51,41 @@ export class ResultsStore {
     this.db.exec('DELETE FROM results')
   }
 
-  private whereClause(filter: string): { sql: string; param: string[] } {
-    if (!filter.trim()) return { sql: '', param: [] }
-    const like = `%${filter.trim()}%`
-    return {
-      sql: ' WHERE name LIKE ? OR address LIKE ? OR category LIKE ? OR phone LIKE ? OR email LIKE ?',
-      param: [like, like, like, like, like],
+  private whereClause(q: ResultQuery): { sql: string; param: (string | number)[] } {
+    const clauses: string[] = []
+    const param: (string | number)[] = []
+    if (q.q?.trim()) {
+      const like = `%${q.q.trim()}%`
+      clauses.push('(name LIKE ? OR address LIKE ? OR category LIKE ? OR phone LIKE ? OR email LIKE ?)')
+      param.push(like, like, like, like, like)
     }
+    if (q.category?.trim()) { clauses.push('category LIKE ?'); param.push(`%${q.category.trim()}%`) }
+    if (q.minRating != null) { clauses.push('rating >= ?'); param.push(q.minRating) }
+    if (q.minReviews != null) { clauses.push('reviewCount >= ?'); param.push(q.minReviews) }
+    if (q.hasEmail) clauses.push("email <> ''")
+    if (q.hasWebsite) clauses.push("website <> ''")
+    if (q.hasPhone) clauses.push("phone <> ''")
+    return { sql: clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '', param }
   }
 
-  count(filter = ''): number {
-    const { sql, param } = this.whereClause(filter)
+  private orderClause(q: ResultQuery): string {
+    if (q.sortBy && SORTABLE.has(q.sortBy)) {
+      const dir = q.sortDir === 'desc' ? 'DESC' : 'ASC'
+      return ` ORDER BY ${q.sortBy} ${dir}`
+    }
+    return ' ORDER BY id ASC'
+  }
+
+  count(q: ResultQuery = {}): number {
+    const { sql, param } = this.whereClause(q)
     const row = this.db.prepare(`SELECT COUNT(*) AS n FROM results${sql}`).get(...param) as { n: number }
     return row.n
   }
 
-  queryPage(offset: number, limit: number, filter = ''): Business[] {
-    const { sql, param } = this.whereClause(filter)
+  queryPage(offset: number, limit: number, q: ResultQuery = {}): Business[] {
+    const { sql, param } = this.whereClause(q)
     const rows = this.db
-      .prepare(`SELECT * FROM results${sql} ORDER BY id ASC LIMIT ? OFFSET ?`)
+      .prepare(`SELECT * FROM results${sql}${this.orderClause(q)} LIMIT ? OFFSET ?`)
       .all(...param, limit, offset)
     return rows.map(toBusiness)
   }

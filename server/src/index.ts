@@ -56,6 +56,7 @@ const app = createApp({
     page: (offset, limit, filter) => store.queryPage(offset, limit, filter),
     count: (filter) => store.count(filter),
     iterate: (batch) => store.iterateAll(batch),
+    clear: () => { store.reset(); inserted = 0 },
   },
   startJob: (keywords: string[], locations: LocationSpec[], settings: JobSettings) => {
     store.reset()

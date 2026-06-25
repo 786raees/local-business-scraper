@@ -36,6 +36,18 @@ export interface TaskSpec {
   location: LocationSpec
 }
 
+export interface ResultQuery {
+  q?: string
+  category?: string
+  minRating?: number
+  minReviews?: number
+  hasEmail?: boolean
+  hasWebsite?: boolean
+  hasPhone?: boolean
+  sortBy?: string
+  sortDir?: 'asc' | 'desc'
+}
+
 export type TaskStatus = 'queued' | 'running' | 'done' | 'error' | 'blocked'
 
 export type JobEvent =

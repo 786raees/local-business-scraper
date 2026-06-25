@@ -23,12 +23,33 @@ describe('ResultsStore', () => {
     expect(page[4].name).toBe('Biz 14')
   })
 
-  it('filters by text across fields', () => {
+  it('filters by global text across fields', () => {
     const s = new ResultsStore(':memory:')
     s.insert(biz('Joe Plumbing', { category: 'Plumber' }))
     s.insert(biz('City Cafe', { category: 'Coffee shop' }))
-    expect(s.count('plumb')).toBe(1)
-    expect(s.queryPage(0, 10, 'coffee')[0].name).toBe('City Cafe')
+    expect(s.count({ q: 'plumb' })).toBe(1)
+    expect(s.queryPage(0, 10, { q: 'coffee' })[0].name).toBe('City Cafe')
+  })
+
+  it('filters by rating, reviews, and presence flags', () => {
+    const s = new ResultsStore(':memory:')
+    s.insert(biz('A', { rating: 4.8, reviewCount: 200, email: 'a@x.com', website: 'https://a.com' }))
+    s.insert(biz('B', { rating: 3.5, reviewCount: 10, email: '', website: '' }))
+    expect(s.count({ minRating: 4 })).toBe(1)
+    expect(s.count({ minReviews: 100 })).toBe(1)
+    expect(s.count({ hasEmail: true })).toBe(1)
+    expect(s.count({ hasWebsite: true })).toBe(1)
+    expect(s.queryPage(0, 10, { minRating: 4 })[0].name).toBe('A')
+  })
+
+  it('sorts by an allowed column and ignores disallowed ones', () => {
+    const s = new ResultsStore(':memory:')
+    s.insert(biz('Bravo', { rating: 4.0 }))
+    s.insert(biz('Alpha', { rating: 5.0 }))
+    expect(s.queryPage(0, 10, { sortBy: 'name', sortDir: 'asc' })[0].name).toBe('Alpha')
+    expect(s.queryPage(0, 10, { sortBy: 'rating', sortDir: 'desc' })[0].name).toBe('Alpha')
+    // disallowed sort column falls back to id order (insertion order)
+    expect(s.queryPage(0, 10, { sortBy: 'id; DROP TABLE results' })[0].name).toBe('Bravo')
   })
 
   it('reset clears all rows', () => {
