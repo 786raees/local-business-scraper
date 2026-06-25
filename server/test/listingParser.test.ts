@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseRating, parsePriceLevel, extractEmailFromHtml } from '../src/scraper/listingParser.js'
+import { parseRating, parsePriceLevel, extractEmailFromHtml, extractSocials } from '../src/scraper/listingParser.js'
 
 describe('parseRating', () => {
   it('parses rating and review count from aria label', () => {
@@ -25,5 +25,27 @@ describe('extractEmailFromHtml', () => {
   })
   it('returns empty when none', () => {
     expect(extractEmailFromHtml('<p>no contact</p>')).toBe('')
+  })
+})
+
+describe('extractSocials', () => {
+  it('detects the business profile per platform', () => {
+    const s = extractSocials([
+      'https://www.facebook.com/acmeplumbing',
+      'https://instagram.com/acme',
+      'https://x.com/acme',
+      'https://www.yelp.com/biz/acme-miami',
+      'https://www.yellowpages.com/miami-fl/acme',
+      'https://maps.google.com/whatever',
+    ])
+    expect(s.facebook).toContain('facebook.com/acmeplumbing')
+    expect(s.instagram).toContain('instagram.com/acme')
+    expect(s.twitter).toContain('x.com/acme')
+    expect(s.yelp).toContain('yelp.com/biz/acme')
+    expect(s.yellowpages).toContain('yellowpages.com')
+  })
+  it('ignores share/sharer widget links', () => {
+    const s = extractSocials(['https://www.facebook.com/sharer/sharer.php?u=acme.com'])
+    expect(s.facebook).toBeUndefined()
   })
 })

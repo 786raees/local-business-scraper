@@ -1,8 +1,10 @@
 import { Business } from '../types.js'
 
 export const ALL_COLUMNS: (keyof Business)[] = [
-  'name', 'address', 'phone', 'website', 'rating', 'reviewCount', 'priceLevel',
-  'category', 'hours', 'email', 'mapsUrl', 'keyword', 'location',
+  'name', 'address', 'phone', 'website', 'email', 'rating', 'reviewCount', 'priceLevel',
+  'category', 'hours',
+  'facebook', 'instagram', 'twitter', 'linkedin', 'youtube', 'tiktok', 'yelp', 'yellowpages',
+  'mapsUrl', 'keyword', 'location',
 ]
 
 function cell(value: unknown): string {

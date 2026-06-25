@@ -6,6 +6,12 @@ export interface LocationSpec {
   label: string
 }
 
+export const SOCIAL_PLATFORMS = [
+  'facebook', 'instagram', 'twitter', 'linkedin', 'youtube', 'tiktok', 'yelp', 'yellowpages',
+] as const
+export type SocialPlatform = (typeof SOCIAL_PLATFORMS)[number]
+export type Socials = Record<SocialPlatform, string>
+
 export interface Business {
   name: string
   address: string
@@ -20,6 +26,14 @@ export interface Business {
   mapsUrl: string
   keyword: string
   location: string
+  facebook: string
+  instagram: string
+  twitter: string
+  linkedin: string
+  youtube: string
+  tiktok: string
+  yelp: string
+  yellowpages: string
 }
 
 export interface JobSettings {
@@ -61,5 +75,7 @@ export function emptyBusiness(keyword: string, location: string): Business {
   return {
     name: '', address: '', phone: '', website: '', rating: null, reviewCount: null,
     priceLevel: '', category: '', hours: '', email: '', mapsUrl: '', keyword, location,
+    facebook: '', instagram: '', twitter: '', linkedin: '', youtube: '', tiktok: '',
+    yelp: '', yellowpages: '',
   }
 }

@@ -9,6 +9,7 @@ const { DatabaseSync } = require('node:sqlite') as typeof import('node:sqlite')
 const COLUMNS: (keyof Business)[] = [
   'name', 'address', 'phone', 'website', 'rating', 'reviewCount', 'priceLevel',
   'category', 'hours', 'email', 'mapsUrl', 'keyword', 'location',
+  'facebook', 'instagram', 'twitter', 'linkedin', 'youtube', 'tiktok', 'yelp', 'yellowpages',
 ]
 
 // Columns the client is allowed to sort by (prevents SQL injection via sortBy).
@@ -33,10 +34,19 @@ export class ResultsStore {
         name TEXT, address TEXT, phone TEXT, website TEXT,
         rating REAL, reviewCount INTEGER, priceLevel TEXT,
         category TEXT, hours TEXT, email TEXT, mapsUrl TEXT,
-        keyword TEXT, location TEXT
+        keyword TEXT, location TEXT,
+        facebook TEXT, instagram TEXT, twitter TEXT, linkedin TEXT,
+        youtube TEXT, tiktok TEXT, yelp TEXT, yellowpages TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_results_name ON results(name);
     `)
+    // Migrate older DBs that predate the social columns.
+    const existing = new Set(
+      (this.db.prepare('PRAGMA table_info(results)').all() as { name: string }[]).map((c) => c.name),
+    )
+    for (const col of ['facebook', 'instagram', 'twitter', 'linkedin', 'youtube', 'tiktok', 'yelp', 'yellowpages']) {
+      if (!existing.has(col)) this.db.exec(`ALTER TABLE results ADD COLUMN ${col} TEXT`)
+    }
     const cols = COLUMNS.join(', ')
     const placeholders = COLUMNS.map(() => '?').join(', ')
     this.insertStmt = this.db.prepare(`INSERT INTO results (${cols}) VALUES (${placeholders})`)
@@ -111,5 +121,8 @@ function toBusiness(r: any): Business {
     rating: r.rating ?? null, reviewCount: r.reviewCount ?? null, priceLevel: r.priceLevel ?? '',
     category: r.category ?? '', hours: r.hours ?? '', email: r.email ?? '', mapsUrl: r.mapsUrl ?? '',
     keyword: r.keyword ?? '', location: r.location ?? '',
+    facebook: r.facebook ?? '', instagram: r.instagram ?? '', twitter: r.twitter ?? '',
+    linkedin: r.linkedin ?? '', youtube: r.youtube ?? '', tiktok: r.tiktok ?? '',
+    yelp: r.yelp ?? '', yellowpages: r.yellowpages ?? '',
   }
 }

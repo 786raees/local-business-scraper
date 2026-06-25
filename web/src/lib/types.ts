@@ -20,7 +20,20 @@ export interface Business {
   mapsUrl: string
   keyword: string
   location: string
+  facebook: string
+  instagram: string
+  twitter: string
+  linkedin: string
+  youtube: string
+  tiktok: string
+  yelp: string
+  yellowpages: string
 }
+
+export const SOCIAL_FIELDS = [
+  ['facebook', 'FB'], ['instagram', 'IG'], ['twitter', 'X'], ['linkedin', 'IN'],
+  ['youtube', 'YT'], ['tiktok', 'TT'], ['yelp', 'Yelp'], ['yellowpages', 'YP'],
+] as const
 
 export interface JobSettings {
   maxResults: number

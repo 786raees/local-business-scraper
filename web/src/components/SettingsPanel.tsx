@@ -33,7 +33,7 @@ export function SettingsPanel() {
       </label>
 
       <div className="flex items-center justify-between text-sm text-parchment">
-        <span>Extract email <span className="text-muted">(slower)</span></span>
+        <span>Scrape website <span className="text-muted">(email + socials, slower)</span></span>
         <Toggle on={settings.extractEmail} onChange={(v) => setSettings({ extractEmail: v })} />
       </div>
 

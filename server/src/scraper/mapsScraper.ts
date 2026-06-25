@@ -1,7 +1,8 @@
-import { chromium, Browser, Page } from 'playwright'
+import { chromium, Browser, BrowserContext, Page } from 'playwright'
 import { Business, JobSettings, emptyBusiness } from '../types.js'
 import { SELECTORS } from './selectors.js'
 import { parseRating, parsePriceLevel } from './listingParser.js'
+import { scrapeWebsite } from './siteScraper.js'
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
 
@@ -88,6 +89,16 @@ export async function scrapeMaps(
     for (const url of urls) {
       if (signal?.aborted) break
       const b = await scrapeDetail(page, url, keyword, location)
+      // Open the business website to pull email + social/directory links.
+      if (settings.extractEmail && b.website) {
+        try {
+          const { email, socials } = await scrapeWebsite(ctx as BrowserContext, b.website, signal)
+          b.email = email
+          b.facebook = socials.facebook; b.instagram = socials.instagram; b.twitter = socials.twitter
+          b.linkedin = socials.linkedin; b.youtube = socials.youtube; b.tiktok = socials.tiktok
+          b.yelp = socials.yelp; b.yellowpages = socials.yellowpages
+        } catch { /* website unreachable — keep GMB data */ }
+      }
       if (b.name) { out.push(b); onRow(b) }
       await delay(settings.delayMinMs, settings.delayMaxMs)
     }

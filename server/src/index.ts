@@ -5,24 +5,15 @@ import { listCountries, listStates, listCities } from './geo/geoData.js'
 import { lookupZips } from './geo/zipLookup.js'
 import { JobRunner } from './queue/jobRunner.js'
 import { scrapeMaps } from './scraper/mapsScraper.js'
-import { findEmailForWebsite } from './scraper/emailScraper.js'
 import { ResultsStore } from './db/store.js'
-import { JobSettings, LocationSpec, Business, JobEvent } from './types.js'
+import { JobSettings, LocationSpec, JobEvent } from './types.js'
 
 const store = new ResultsStore('results.db')
 
 let hub: WsHub
-const runner = new JobRunner(async (keyword, location, settings, onRow, signal) => {
-  return scrapeMaps(keyword, location, settings, async (b: Business) => {
-    if (settings.extractEmail && b.website) {
-      b.email = await findEmailForWebsite(b.website, async (url) => {
-        const res = await fetch(url, { signal: AbortSignal.timeout(8000) })
-        return res.text()
-      })
-    }
-    onRow(b)
-  }, signal)
-})
+// Website enrichment (email + socials) happens inside scrapeMaps using the browser.
+const runner = new JobRunner((keyword, location, settings, onRow, signal) =>
+  scrapeMaps(keyword, location, settings, onRow, signal))
 
 // Persist rows to the DB and broadcast a throttled count instead of one
 // message per row — so the browser never receives millions of WS messages.

@@ -3,9 +3,10 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import { useStore } from '../lib/store'
 import { useResults } from '../hooks/useResults'
 import type { Business, ResultQuery } from '../lib/types'
+import { SOCIAL_FIELDS } from '../lib/types'
 
 const ROW_H = 40
-const GRID = 'minmax(160px,1.4fr) minmax(110px,1fr) minmax(180px,1.6fr) 130px 70px 80px 80px minmax(160px,1.2fr)'
+const GRID = 'minmax(150px,1.3fr) minmax(100px,0.9fr) minmax(170px,1.5fr) 130px 60px 60px minmax(150px,1.1fr) minmax(150px,1.1fr)'
 
 type Col = { key: keyof Business; label: string; sortable: boolean }
 const COLS: Col[] = [
@@ -13,10 +14,10 @@ const COLS: Col[] = [
   { key: 'category', label: 'Category', sortable: true },
   { key: 'address', label: 'Address', sortable: true },
   { key: 'phone', label: 'Phone', sortable: true },
-  { key: 'website', label: 'Website', sortable: false },
+  { key: 'website', label: 'Site', sortable: false },
   { key: 'rating', label: 'Rating', sortable: true },
-  { key: 'reviewCount', label: 'Reviews', sortable: true },
   { key: 'email', label: 'Email', sortable: true },
+  { key: 'facebook', label: 'Socials', sortable: false },
 ]
 
 const RATINGS = [
@@ -163,9 +164,24 @@ function Cells({ row }: { row: Business }) {
           : <span className="text-muted">—</span>}
       </Cell>
       <Cell className="font-mono">{row.rating != null ? <span className="text-amber">{row.rating.toFixed(1)}★</span> : <span className="text-muted">—</span>}</Cell>
-      <Cell className="font-mono text-xs text-muted">{row.reviewCount ?? ''}</Cell>
       <Cell className="font-mono text-xs">{row.email || <span className="text-muted">—</span>}</Cell>
+      <Cell><Socials row={row} /></Cell>
     </>
+  )
+}
+
+function Socials({ row }: { row: Business }) {
+  const links = SOCIAL_FIELDS.filter(([key]) => row[key])
+  if (!links.length) return <span className="text-muted">—</span>
+  return (
+    <div className="flex flex-wrap gap-1">
+      {links.map(([key, label]) => (
+        <a key={key} href={row[key]} target="_blank" rel="noreferrer" title={`${label}: ${row[key]}`}
+          className="rounded border border-line bg-ink-700 px-1.5 py-0.5 font-mono text-[10px] text-teal hover:border-teal">
+          {label}
+        </a>
+      ))}
+    </div>
   )
 }
 
