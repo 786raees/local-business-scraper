@@ -5,3 +5,4 @@ dist/
 .geo-cache/
 playwright-report/
 results.db
+.whois-cache/

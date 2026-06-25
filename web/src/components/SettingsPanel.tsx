@@ -38,6 +38,11 @@ export function SettingsPanel() {
       </div>
 
       <div className="flex items-center justify-between text-sm text-parchment">
+        <span>Find owner <span className="text-muted">(name via site + WHOIS)</span></span>
+        <Toggle on={settings.findOwner} onChange={(v) => setSettings({ findOwner: v })} />
+      </div>
+
+      <div className="flex items-center justify-between text-sm text-parchment">
         <span>Show browser</span>
         <Toggle on={!settings.headless} onChange={(v) => setSettings({ headless: !v })} />
       </div>

@@ -26,7 +26,7 @@ export const useStore = create<State>((set) => ({
   locations: [],
   total: 0,
   queue: [],
-  settings: { maxResults: 30, extractEmail: false, headless: true, delayMinMs: 600, delayMaxMs: 1500 },
+  settings: { maxResults: 30, extractEmail: false, findOwner: false, headless: true, delayMinMs: 600, delayMaxMs: 1500 },
   progress: { done: 0, total: 0 },
   running: false,
   addKeyword: (k) => set((s) => s.keywords.includes(k) || !k.trim() ? s : { keywords: [...s.keywords, k.trim()] }),

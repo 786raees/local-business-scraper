@@ -52,7 +52,7 @@ describe('routes', () => {
     const res = await request(createApp(makeDeps() as any)).get('/api/export/csv')
     expect(res.status).toBe(200)
     expect(res.headers['content-type']).toContain('text/csv')
-    expect(res.text.split('\n')[0]).toContain('name,address')
+    expect(res.text.split('\n')[0]).toContain('name,ownerName')
     expect(res.text).toContain('Acme')
     expect(res.text).toContain('Beta')
   })

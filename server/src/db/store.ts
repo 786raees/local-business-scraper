@@ -10,11 +10,12 @@ const COLUMNS: (keyof Business)[] = [
   'name', 'address', 'phone', 'website', 'rating', 'reviewCount', 'priceLevel',
   'category', 'hours', 'email', 'mapsUrl', 'keyword', 'location',
   'facebook', 'instagram', 'twitter', 'linkedin', 'youtube', 'tiktok', 'yelp', 'yellowpages',
+  'ownerName', 'ownerTitle', 'ownerSource',
 ]
 
 // Columns the client is allowed to sort by (prevents SQL injection via sortBy).
 const SORTABLE = new Set<string>([
-  'name', 'rating', 'reviewCount', 'category', 'address', 'phone', 'email', 'location',
+  'name', 'rating', 'reviewCount', 'category', 'address', 'phone', 'email', 'location', 'ownerName',
 ])
 
 /**
@@ -36,15 +37,20 @@ export class ResultsStore {
         category TEXT, hours TEXT, email TEXT, mapsUrl TEXT,
         keyword TEXT, location TEXT,
         facebook TEXT, instagram TEXT, twitter TEXT, linkedin TEXT,
-        youtube TEXT, tiktok TEXT, yelp TEXT, yellowpages TEXT
+        youtube TEXT, tiktok TEXT, yelp TEXT, yellowpages TEXT,
+        ownerName TEXT, ownerTitle TEXT, ownerSource TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_results_name ON results(name);
     `)
-    // Migrate older DBs that predate the social columns.
+    // Migrate older DBs that predate the social/owner columns.
     const existing = new Set(
       (this.db.prepare('PRAGMA table_info(results)').all() as { name: string }[]).map((c) => c.name),
     )
-    for (const col of ['facebook', 'instagram', 'twitter', 'linkedin', 'youtube', 'tiktok', 'yelp', 'yellowpages']) {
+    const added = [
+      'facebook', 'instagram', 'twitter', 'linkedin', 'youtube', 'tiktok', 'yelp', 'yellowpages',
+      'ownerName', 'ownerTitle', 'ownerSource',
+    ]
+    for (const col of added) {
       if (!existing.has(col)) this.db.exec(`ALTER TABLE results ADD COLUMN ${col} TEXT`)
     }
     const cols = COLUMNS.join(', ')
@@ -124,5 +130,6 @@ function toBusiness(r: any): Business {
     facebook: r.facebook ?? '', instagram: r.instagram ?? '', twitter: r.twitter ?? '',
     linkedin: r.linkedin ?? '', youtube: r.youtube ?? '', tiktok: r.tiktok ?? '',
     yelp: r.yelp ?? '', yellowpages: r.yellowpages ?? '',
+    ownerName: r.ownerName ?? '', ownerTitle: r.ownerTitle ?? '', ownerSource: r.ownerSource ?? '',
   }
 }

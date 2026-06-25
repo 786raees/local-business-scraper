@@ -28,6 +28,9 @@ export interface Business {
   tiktok: string
   yelp: string
   yellowpages: string
+  ownerName: string
+  ownerTitle: string
+  ownerSource: string
 }
 
 export const SOCIAL_FIELDS = [
@@ -38,6 +41,7 @@ export const SOCIAL_FIELDS = [
 export interface JobSettings {
   maxResults: number
   extractEmail: boolean
+  findOwner: boolean
   headless: boolean
   delayMinMs: number
   delayMaxMs: number

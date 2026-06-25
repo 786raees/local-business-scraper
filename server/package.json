@@ -10,6 +10,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "compromise": "^14.15.1",
     "country-state-city": "^3.2.1",
     "express": "^4.19.2",
     "playwright": "^1.48.0",

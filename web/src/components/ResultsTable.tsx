@@ -6,15 +6,15 @@ import type { Business, ResultQuery } from '../lib/types'
 import { SOCIAL_FIELDS } from '../lib/types'
 
 const ROW_H = 40
-const GRID = 'minmax(150px,1.3fr) minmax(100px,0.9fr) minmax(170px,1.5fr) 130px 60px 60px minmax(150px,1.1fr) minmax(150px,1.1fr)'
+const GRID = 'minmax(150px,1.3fr) minmax(120px,1fr) minmax(95px,0.8fr) minmax(160px,1.4fr) 130px 60px minmax(150px,1.1fr) minmax(140px,1fr)'
 
 type Col = { key: keyof Business; label: string; sortable: boolean }
 const COLS: Col[] = [
   { key: 'name', label: 'Name', sortable: true },
+  { key: 'ownerName', label: 'Owner', sortable: true },
   { key: 'category', label: 'Category', sortable: true },
   { key: 'address', label: 'Address', sortable: true },
   { key: 'phone', label: 'Phone', sortable: true },
-  { key: 'website', label: 'Site', sortable: false },
   { key: 'rating', label: 'Rating', sortable: true },
   { key: 'email', label: 'Email', sortable: true },
   { key: 'facebook', label: 'Socials', sortable: false },
@@ -154,15 +154,19 @@ function FilterChip({ on, onClick, children }: { on: boolean; onClick: () => voi
 function Cells({ row }: { row: Business }) {
   return (
     <>
-      <Cell className="text-parchment">{row.name}</Cell>
+      <Cell className="text-parchment">
+        {row.website
+          ? <a href={row.website} target="_blank" rel="noreferrer" className="text-parchment hover:text-teal hover:underline">{row.name}</a>
+          : row.name}
+      </Cell>
+      <Cell>
+        {row.ownerName
+          ? <span className="text-parchment" title={`${row.ownerTitle} · ${row.ownerSource}`}>{row.ownerName}</span>
+          : <span className="text-muted">—</span>}
+      </Cell>
       <Cell className="text-muted">{row.category}</Cell>
       <Cell className="text-muted">{row.address}</Cell>
       <Cell className="font-mono text-xs">{row.phone}</Cell>
-      <Cell>
-        {row.website
-          ? <a href={row.website} target="_blank" rel="noreferrer" className="text-teal hover:underline">link</a>
-          : <span className="text-muted">—</span>}
-      </Cell>
       <Cell className="font-mono">{row.rating != null ? <span className="text-amber">{row.rating.toFixed(1)}★</span> : <span className="text-muted">—</span>}</Cell>
       <Cell className="font-mono text-xs">{row.email || <span className="text-muted">—</span>}</Cell>
       <Cell><Socials row={row} /></Cell>

@@ -89,14 +89,15 @@ export async function scrapeMaps(
     for (const url of urls) {
       if (signal?.aborted) break
       const b = await scrapeDetail(page, url, keyword, location)
-      // Open the business website to pull email + social/directory links.
-      if (settings.extractEmail && b.website) {
+      // Open the business website to pull email + socials (+ owner if requested).
+      if ((settings.extractEmail || settings.findOwner) && b.website) {
         try {
-          const { email, socials } = await scrapeWebsite(ctx as BrowserContext, b.website, signal)
-          b.email = email
-          b.facebook = socials.facebook; b.instagram = socials.instagram; b.twitter = socials.twitter
-          b.linkedin = socials.linkedin; b.youtube = socials.youtube; b.tiktok = socials.tiktok
-          b.yelp = socials.yelp; b.yellowpages = socials.yellowpages
+          const site = await scrapeWebsite(ctx as BrowserContext, b.website, { findOwner: settings.findOwner }, signal)
+          b.email = site.email
+          b.facebook = site.socials.facebook; b.instagram = site.socials.instagram; b.twitter = site.socials.twitter
+          b.linkedin = site.socials.linkedin; b.youtube = site.socials.youtube; b.tiktok = site.socials.tiktok
+          b.yelp = site.socials.yelp; b.yellowpages = site.socials.yellowpages
+          b.ownerName = site.ownerName; b.ownerTitle = site.ownerTitle; b.ownerSource = site.ownerSource
         } catch { /* website unreachable — keep GMB data */ }
       }
       if (b.name) { out.push(b); onRow(b) }

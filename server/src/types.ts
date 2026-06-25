@@ -34,11 +34,15 @@ export interface Business {
   tiktok: string
   yelp: string
   yellowpages: string
+  ownerName: string
+  ownerTitle: string
+  ownerSource: string
 }
 
 export interface JobSettings {
   maxResults: number
   extractEmail: boolean
+  findOwner: boolean
   headless: boolean
   delayMinMs: number
   delayMaxMs: number
@@ -77,5 +81,6 @@ export function emptyBusiness(keyword: string, location: string): Business {
     priceLevel: '', category: '', hours: '', email: '', mapsUrl: '', keyword, location,
     facebook: '', instagram: '', twitter: '', linkedin: '', youtube: '', tiktok: '',
     yelp: '', yellowpages: '',
+    ownerName: '', ownerTitle: '', ownerSource: '',
   }
 }
