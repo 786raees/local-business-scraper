@@ -1,12 +1,12 @@
 import { create } from 'zustand'
-import type { Business, JobSettings, LocationSpec, JobEvent, TaskStatus } from './types'
+import type { JobSettings, LocationSpec, JobEvent, TaskStatus } from './types'
 
 interface QueueItem { id: string; status: TaskStatus; count: number; error?: string }
 
 interface State {
   keywords: string[]
   locations: LocationSpec[]
-  results: Business[]
+  total: number          // live row count reported by the server
   queue: QueueItem[]
   settings: JobSettings
   progress: { done: number; total: number }
@@ -24,7 +24,7 @@ interface State {
 export const useStore = create<State>((set) => ({
   keywords: [],
   locations: [],
-  results: [],
+  total: 0,
   queue: [],
   settings: { maxResults: 30, extractEmail: false, headless: true, delayMinMs: 600, delayMaxMs: 1500 },
   progress: { done: 0, total: 0 },
@@ -35,9 +35,9 @@ export const useStore = create<State>((set) => ({
   removeLocation: (label) => set((s) => ({ locations: s.locations.filter((x) => x.label !== label) })),
   setSettings: (p) => set((s) => ({ settings: { ...s.settings, ...p } })),
   setRunning: (r) => set({ running: r }),
-  reset: () => set({ results: [], queue: [], progress: { done: 0, total: 0 } }),
+  reset: () => set({ total: 0, queue: [], progress: { done: 0, total: 0 } }),
   applyEvent: (e) => set((s) => {
-    if (e.type === 'row') return { results: [...s.results, e.business] }
+    if (e.type === 'count') return { total: e.total }
     if (e.type === 'progress') return { progress: { done: e.done, total: e.total } }
     if (e.type === 'job-done') return { running: false }
     if (e.type === 'task-update') {

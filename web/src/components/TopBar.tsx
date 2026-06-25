@@ -2,7 +2,7 @@ import { useStore } from '../lib/store'
 import { api } from '../lib/api'
 
 export function TopBar() {
-  const { keywords, locations, settings, results, progress, running, setRunning, reset } = useStore()
+  const { keywords, locations, settings, total, progress, running, setRunning, reset } = useStore()
   const start = async () => {
     reset(); setRunning(true)
     await api.startJob({ keywords, locations, settings })
@@ -51,20 +51,22 @@ export function TopBar() {
             />
           </div>
           <span className="whitespace-nowrap font-mono text-xs text-muted">
-            <span className="text-teal">{results.length.toString().padStart(3, '0')}</span> rows
+            <span className="text-teal">{total.toLocaleString()}</span> rows
             <span className="px-1.5 text-line">·</span>
             {progress.done}/{progress.total} tasks
           </span>
         </div>
 
-        <button
-          onClick={() => api.exportCsv(results)}
-          disabled={!results.length}
-          className="rounded-md border border-line px-3 py-1.5 text-sm font-500 text-parchment transition
-                     hover:border-teal hover:text-teal disabled:cursor-not-allowed disabled:opacity-40"
+        <a
+          href={total ? api.exportCsvUrl() : undefined}
+          download
+          aria-disabled={!total}
+          onClick={(e) => { if (!total) e.preventDefault() }}
+          className={`rounded-md border border-line px-3 py-1.5 text-sm font-500 text-parchment transition
+                     hover:border-teal hover:text-teal ${!total ? 'cursor-not-allowed opacity-40' : ''}`}
         >
           Export CSV
-        </button>
+        </a>
       </div>
     </header>
   )

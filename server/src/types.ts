@@ -41,6 +41,7 @@ export type TaskStatus = 'queued' | 'running' | 'done' | 'error' | 'blocked'
 export type JobEvent =
   | { type: 'task-update'; taskId: string; status: TaskStatus; count?: number; error?: string }
   | { type: 'row'; business: Business }
+  | { type: 'count'; total: number }
   | { type: 'progress'; done: number; total: number }
   | { type: 'job-done' }
 

@@ -1,5 +1,5 @@
 import express, { Express } from 'express'
-import { toCsv } from '../export/csv.js'
+import { csvHeaderLine, csvRows } from '../export/csv.js'
 import { Business, JobSettings, LocationSpec } from '../types.js'
 
 export interface RouteDeps {
@@ -9,13 +9,18 @@ export interface RouteDeps {
     cities: (country: string, state: string) => { name: string }[]
     zips: (country: string, state: string, city: string) => Promise<string[]>
   }
+  results: {
+    page: (offset: number, limit: number, filter: string) => Business[]
+    count: (filter: string) => number
+    iterate: (batch: number) => Generator<Business[]>
+  }
   startJob: (keywords: string[], locations: LocationSpec[], settings: JobSettings) => void
   stopJob: () => void
 }
 
 export function createApp(deps: RouteDeps): Express {
   const app = express()
-  app.use(express.json({ limit: '10mb' }))
+  app.use(express.json({ limit: '2mb' }))
 
   app.get('/api/geo/countries', (_req, res) => res.json(deps.geo.countries()))
   app.get('/api/geo/states', (req, res) => res.json(deps.geo.states(String(req.query.country ?? ''))))
@@ -27,6 +32,14 @@ export function createApp(deps: RouteDeps): Express {
     res.json(zips)
   })
 
+  // Paginated, filtered window over results — the FE fetches only what it shows.
+  app.get('/api/results', (req, res) => {
+    const offset = Math.max(0, Number(req.query.offset ?? 0))
+    const limit = Math.min(500, Math.max(1, Number(req.query.limit ?? 100)))
+    const filter = String(req.query.filter ?? '')
+    res.json({ rows: deps.results.page(offset, limit, filter), total: deps.results.count(filter) })
+  })
+
   app.post('/api/job/start', (req, res) => {
     const { keywords, locations, settings } = req.body
     deps.startJob(keywords, locations, settings)
@@ -34,12 +47,13 @@ export function createApp(deps: RouteDeps): Express {
   })
   app.post('/api/job/stop', (_req, res) => { deps.stopJob(); res.json({ ok: true }) })
 
-  app.post('/api/export/csv', (req, res) => {
-    const rows: Business[] = req.body.rows ?? []
-    const columns = req.body.columns as (keyof Business)[] | undefined
+  // Stream the full result set from disk so export scales to millions of rows.
+  app.get('/api/export/csv', (_req, res) => {
     res.setHeader('Content-Type', 'text/csv')
     res.setHeader('Content-Disposition', 'attachment; filename="results.csv"')
-    res.send(toCsv(rows, columns))
+    res.write(csvHeaderLine() + '\n')
+    for (const batch of deps.results.iterate(1000)) res.write(csvRows(batch))
+    res.end()
   })
 
   return app

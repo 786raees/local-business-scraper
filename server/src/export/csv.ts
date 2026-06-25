@@ -1,6 +1,6 @@
 import { Business } from '../types.js'
 
-const ALL: (keyof Business)[] = [
+export const ALL_COLUMNS: (keyof Business)[] = [
   'name', 'address', 'phone', 'website', 'rating', 'reviewCount', 'priceLevel',
   'category', 'hours', 'email', 'mapsUrl', 'keyword', 'location',
 ]
@@ -10,8 +10,18 @@ function cell(value: unknown): string {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
 }
 
-export function toCsv(rows: Business[], columns: (keyof Business)[] = ALL): string {
-  const header = columns.join(',')
-  const body = rows.map((r) => columns.map((c) => cell(r[c])).join(',')).join('\n')
-  return header + '\n' + body + '\n'
+/** Header line (no trailing newline). */
+export function csvHeaderLine(columns: (keyof Business)[] = ALL_COLUMNS): string {
+  return columns.join(',')
+}
+
+/** Body lines for a batch of rows (each row newline-terminated). */
+export function csvRows(rows: Business[], columns: (keyof Business)[] = ALL_COLUMNS): string {
+  if (!rows.length) return ''
+  return rows.map((r) => columns.map((c) => cell(r[c])).join(',')).join('\n') + '\n'
+}
+
+/** Whole-document CSV (header + body). Used by tests and small exports. */
+export function toCsv(rows: Business[], columns: (keyof Business)[] = ALL_COLUMNS): string {
+  return csvHeaderLine(columns) + '\n' + csvRows(rows, columns)
 }

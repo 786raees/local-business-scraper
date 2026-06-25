@@ -4,3 +4,4 @@ dist/
 *.log
 .geo-cache/
 playwright-report/
+results.db

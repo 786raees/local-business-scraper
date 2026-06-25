@@ -9,9 +9,9 @@ describe('store', () => {
     useStore.getState().addKeyword('plumber')
     expect(useStore.getState().keywords).toEqual(['plumber'])
   })
-  it('applyEvent row appends to results', () => {
-    useStore.getState().applyEvent({ type: 'row', business: { name: 'X' } as any })
-    expect(useStore.getState().results).toHaveLength(1)
+  it('applyEvent count updates total', () => {
+    useStore.getState().applyEvent({ type: 'count', total: 4200 })
+    expect(useStore.getState().total).toBe(4200)
   })
   it('applyEvent task-update upserts queue item', () => {
     useStore.getState().applyEvent({ type: 'task-update', taskId: '0', status: 'running' })

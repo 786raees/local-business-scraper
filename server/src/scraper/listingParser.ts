@@ -16,10 +16,16 @@ export function parsePriceLevel(text: string): string {
 const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g
 const BAD_EXT = /\.(png|jpe?g|gif|webp|svg|css|js)$/i
 
-export function extractEmailFromHtml(html: string): string {
+/** All plausible (deduped) emails on a page, asset-like matches removed. */
+export function extractAllEmailsFromHtml(html: string): string[] {
   const matches = html.match(EMAIL_RE) ?? []
+  const out: string[] = []
   for (const m of matches) {
-    if (!BAD_EXT.test(m) && !m.startsWith('@')) return m
+    if (!BAD_EXT.test(m) && !m.startsWith('@') && !out.includes(m)) out.push(m)
   }
-  return ''
+  return out
+}
+
+export function extractEmailFromHtml(html: string): string {
+  return extractAllEmailsFromHtml(html)[0] ?? ''
 }
