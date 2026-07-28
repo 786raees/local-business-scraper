@@ -1,7 +1,10 @@
 import express, { Express } from 'express'
 import { Request } from 'express'
 import { csvHeaderLine, csvRows } from '../export/csv.js'
-import { Business, JobSettings, LocationSpec, ResultQuery } from '../types.js'
+import {
+  Business, JobSettings, LocationSpec, ResultQuery,
+  SpreadsheetRef, TabRef, ExportResult, normalizeSettings,
+} from '../types.js'
 
 function parseQuery(req: Request): ResultQuery {
   const q = req.query
@@ -35,6 +38,13 @@ export interface RouteDeps {
   }
   startJob: (keywords: string[], locations: LocationSpec[], settings: JobSettings) => void
   stopJob: () => void
+  sheets: {
+    configured: () => boolean
+    clientEmail: () => string
+    listSpreadsheets: () => Promise<SpreadsheetRef[]>
+    listTabs: (spreadsheetId: string) => Promise<TabRef[]>
+    exportTo: (spreadsheetId: string, sheetTitle: string, createNew: boolean) => Promise<ExportResult>
+  }
 }
 
 export function createApp(deps: RouteDeps): Express {
@@ -60,8 +70,13 @@ export function createApp(deps: RouteDeps): Express {
   })
 
   app.post('/api/job/start', (req, res) => {
-    const { keywords, locations, settings } = req.body
-    deps.startJob(keywords, locations, settings)
+    const { keywords, locations, settings } = req.body ?? {}
+    const kw = (Array.isArray(keywords) ? keywords : []).map(String).filter((k) => k.trim())
+    const locs = (Array.isArray(locations) ? locations : []) as LocationSpec[]
+    if (!kw.length || !locs.length) {
+      return res.status(400).json({ error: 'keywords and locations are both required' })
+    }
+    deps.startJob(kw, locs, normalizeSettings(settings ?? {}))
     res.json({ ok: true })
   })
   app.post('/api/job/stop', (_req, res) => { deps.stopJob(); res.json({ ok: true }) })
@@ -76,6 +91,42 @@ export function createApp(deps: RouteDeps): Express {
     res.write(csvHeaderLine() + '\n')
     for (const batch of deps.results.iterate(1000)) res.write(csvRows(batch))
     res.end()
+  })
+
+  // --- Google Sheets export -------------------------------------------------
+  // A 403 from Google almost always means "the sheet isn't shared with the
+  // service account", so every failure path carries the address to share with.
+  const sheetsError = (res: express.Response, e: unknown) => {
+    const status = (e as { status?: number }).status ?? 500
+    const error = e instanceof Error ? e.message : 'Google Sheets request failed'
+    res.status(status).json({ error, shareWith: deps.sheets.clientEmail() })
+  }
+
+  const requireConfigured = (res: express.Response): boolean => {
+    if (deps.sheets.configured()) return true
+    res.status(503).json({ error: 'Google Sheets export is not configured on the server.' })
+    return false
+  }
+
+  app.get('/api/sheets/spreadsheets', async (_req, res) => {
+    if (!requireConfigured(res)) return
+    try { res.json(await deps.sheets.listSpreadsheets()) } catch (e) { sheetsError(res, e) }
+  })
+
+  app.get('/api/sheets/:id/tabs', async (req, res) => {
+    if (!requireConfigured(res)) return
+    try { res.json(await deps.sheets.listTabs(String(req.params.id))) } catch (e) { sheetsError(res, e) }
+  })
+
+  app.post('/api/export/sheets', async (req, res) => {
+    if (!requireConfigured(res)) return
+    const { spreadsheetId, sheetTitle, createNew } = req.body ?? {}
+    if (!spreadsheetId || !sheetTitle) {
+      return res.status(400).json({ error: 'spreadsheetId and sheetTitle are both required' })
+    }
+    try {
+      res.json(await deps.sheets.exportTo(String(spreadsheetId), String(sheetTitle), Boolean(createNew)))
+    } catch (e) { sheetsError(res, e) }
   })
 
   return app
