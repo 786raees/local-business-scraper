@@ -55,6 +55,22 @@ describe('SheetsClient.appendValues', () => {
   })
 })
 
+describe('SheetsClient.updateValues', () => {
+  it('defaults to RAW so a leading-+ phone number is not parsed as a formula', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({}))
+    const client = new SheetsClient(auth, fetchImpl as unknown as typeof fetch)
+    await client.updateValues('sid', 'Faizan!A2', [['+1 786-474-6894']])
+    expect(String(fetchImpl.mock.calls[0][0])).toContain('valueInputOption=RAW')
+  })
+
+  it('uses USER_ENTERED only when explicitly asked', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({}))
+    const client = new SheetsClient(auth, fetchImpl as unknown as typeof fetch)
+    await client.updateValues('sid', 'Faizan!H2', [['=ARRAYFORMULA(1)']], 'USER_ENTERED')
+    expect(String(fetchImpl.mock.calls[0][0])).toContain('valueInputOption=USER_ENTERED')
+  })
+})
+
 describe('SheetsClient error handling', () => {
   it('throws SheetsApiError carrying the HTTP status', async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ error: { message: 'denied' } }, 403))

@@ -49,7 +49,9 @@ async function restyle(
   const col = columnLetter(map.outreachIndex)
   const letters = map.channelIndexes.map((i) => (i >= 0 ? columnLetter(i) : ''))
   await client.clearValues(spreadsheetId, `'${tabTitle}'!${col}2:${col}`)
-  await client.updateValues(spreadsheetId, `'${tabTitle}'!${col}2`, [[buildOutreachFormula(letters)]])
+  await client.updateValues(
+    spreadsheetId, `'${tabTitle}'!${col}2`, [[buildOutreachFormula(letters)]], 'USER_ENTERED',
+  )
   const after = await client.conditionalFormatCount(spreadsheetId, sheetId)
   console.log(`${tabTitle}: restyled — cleared ${existingRules} stale rules, now ${after}`)
 }
@@ -151,7 +153,9 @@ async function main(): Promise<void> {
   const col = columnLetter(map.outreachIndex)
   const letters = map.channelIndexes.map((i) => (i >= 0 ? columnLetter(i) : ''))
   await client.clearValues(spreadsheetId, `'${tabTitle}'!${col}2:${col}`)
-  await client.updateValues(spreadsheetId, `'${tabTitle}'!${col}2`, [[buildOutreachFormula(letters)]])
+  await client.updateValues(
+    spreadsheetId, `'${tabTitle}'!${col}2`, [[buildOutreachFormula(letters)]], 'USER_ENTERED',
+  )
 
   console.log(`\nmigrated ${tabTitle} (${CRM_HEADERS.length} CRM columns installed)`)
 }

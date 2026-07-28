@@ -83,9 +83,9 @@ async function installOutreachFormula(
   // Cells the append wrote as "" still count as occupied, which would make the
   // ARRAYFORMULA fail with #REF! rather than expanding. Clear the column first.
   await client.clearValues(spreadsheetId, `'${sheetTitle}'!${col}2:${col}`)
-  // updateValues uses USER_ENTERED so this lands as a formula, not literal text.
+  // USER_ENTERED here on purpose: this one write IS a formula.
   await client.updateValues(
-    spreadsheetId, `'${sheetTitle}'!${col}2`, [[buildOutreachFormula(letters)]],
+    spreadsheetId, `'${sheetTitle}'!${col}2`, [[buildOutreachFormula(letters)]], 'USER_ENTERED',
   )
 }
 

@@ -136,6 +136,17 @@ describe('exportToSheet', () => {
     expect(ranges.some((r) => r.includes('H2'))).toBe(true)
   })
 
+  it('writes the Outreach formula with USER_ENTERED and everything else RAW', async () => {
+    const client = fakeClient({ getValues: vi.fn(async () => []) })
+    await exportToSheet(deps([business(1)], client), { spreadsheetId: 'sid', sheetTitle: 'Faizan' })
+    for (const call of client.updateValues.mock.calls) {
+      const [, range, , mode] = call as unknown as [string, string, string[][], string | undefined]
+      // Only the formula install may use USER_ENTERED.
+      if (String(range).includes('H2')) expect(mode).toBe('USER_ENTERED')
+      else expect(mode).toBeUndefined() // defaults to RAW
+    }
+  })
+
   it('clears the Outreach column before writing the formula so it can expand', async () => {
     const client = fakeClient()
     await exportToSheet(deps([business(1)], client), { spreadsheetId: 'sid', sheetTitle: 'Faizan' })

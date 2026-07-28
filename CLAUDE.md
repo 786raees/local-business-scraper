@@ -95,8 +95,13 @@ Data flows in one direction: **job request → queue → scraper → SQLite → 
   3. Applying the template **appends** conditional-format rules rather than replacing them. Always
      delete existing rules first (`clearConditionalFormatRequests`) or stale rules stay pointing at
      repurposed columns. `scripts/migrate-sheet.ts --restyle` reapplies the template safely.
-  4. Writes use `valueInputOption=RAW`. `USER_ENTERED` makes Sheets parse a leading-`+` phone number
-     as a formula. The sole exception is installing the `ARRAYFORMULA` itself.
+  4. **Every write of scraped data uses `valueInputOption=RAW`.** `USER_ENTERED` makes Sheets parse
+     `+1 305-697-3490` as a formula, which fails and leaves `#ERROR!` in the cell — this happened to
+     139 phone numbers when `migrate-sheet.ts` wrote rows through `updateValues` while that method
+     still defaulted to `USER_ENTERED`. `updateValues` now defaults to `RAW`; the *only* call that
+     passes `USER_ENTERED` is installing the `ARRAYFORMULA`. Recovery, if it happens again:
+     `scripts/repair-formula-errors.ts` reads the originals back via `valueRenderOption=FORMULA`
+     (the literal text survives as the cell's `userEnteredValue`) and rewrites them as RAW.
   5. Exports are capped at 50k rows (`MAX_EXPORT_ROWS`), checked *before* any write — Sheets caps a
      spreadsheet at 10M cells, and a half-written sheet is worse than a refusal. CSV handles larger.
   6. `Stage` (where the deal is) and the per-channel statuses are **orthogonal**. The dashboard's

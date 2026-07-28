@@ -87,12 +87,18 @@ export class SheetsClient {
   }
 
   /**
-   * USER_ENTERED on purpose — this is only used to install the Outreach ARRAYFORMULA,
-   * which must be interpreted as a formula rather than stored as literal text.
+   * Defaults to RAW, and callers writing scraped data must keep it that way:
+   * USER_ENTERED makes Sheets parse "+1 305-697-3490" as a formula, which fails and
+   * leaves #ERROR! in the cell. Pass 'USER_ENTERED' only to write an actual formula.
    */
-  async updateValues(spreadsheetId: string, range: string, values: string[][]): Promise<void> {
+  async updateValues(
+    spreadsheetId: string,
+    range: string,
+    values: string[][],
+    mode: 'RAW' | 'USER_ENTERED' = 'RAW',
+  ): Promise<void> {
     await this.request(
-      `${SHEETS}/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`,
+      `${SHEETS}/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=${mode}`,
       { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ values }) },
     )
   }
