@@ -8,6 +8,7 @@
 import { SheetsAuth } from '../src/sheets/auth.js'
 import { SheetsClient } from '../src/sheets/client.js'
 import { placeIdFromUrl } from '../src/scraper/listingParser.js'
+import { fallbackIdentity } from '../src/sheets/exporter.js'
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2).filter((a) => a !== '--dry-run')
@@ -37,14 +38,18 @@ async function main(): Promise<void> {
     const dupes: number[] = []
     values.slice(1).forEach((row, i) => {
       if (!(row[nameCol >= 0 ? nameCol : 0] ?? '').trim()) return
-      const id = placeIdFromUrl(row[mapsUrlCol] ?? '')
-        || `${row[nameCol] ?? ''}|${row[addressCol] ?? ''}`.toLowerCase()
-      const holder = seen.get(id)
+      // A row can be known under two identities (placeId and normalised
+      // name|address); a later row matching EITHER is a duplicate.
+      const ids: string[] = []
+      const pid = placeIdFromUrl(row[mapsUrlCol] ?? '')
+      if (pid) ids.push(pid)
+      ids.push(fallbackIdentity(row[nameCol] ?? '', row[addressCol] ?? ''))
+      const holder = ids.map((id) => seen.get(id)).find(Boolean)
       if (holder) {
         dupes.push(i + 2) // 1-based sheet row
         console.log(`  ${title} row ${i + 2}: "${row[nameCol]}" already in ${holder}`)
       } else {
-        seen.set(id, title)
+        for (const id of ids) seen.set(id, title)
       }
     })
     toDelete.push({ title, sheetId: tab.sheetId, rows: dupes })

@@ -32,22 +32,37 @@ export interface ExporterDeps {
   maxRows?: number
 }
 
+/**
+ * Fallback identity when no Google placeId exists (CSV imports, tabs without a
+ * mapsUrl column). Normalised so systematic format differences between sources
+ * still match: Google addresses end in ", United States", others often don't.
+ */
+export function fallbackIdentity(name: string, address: string): string {
+  const addr = address.toLowerCase()
+    .replace(/,\s*(united states|usa)\s*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return `${name.toLowerCase().replace(/\s+/g, ' ').trim()}|${addr}`
+}
+
 /** Identity for dedup: placeId, matching ResultsStore.insert. */
 function identity(b: Business): string {
-  return placeIdFromUrl(b.mapsUrl) || `${b.name}|${b.address}`.toLowerCase()
+  return placeIdFromUrl(b.mapsUrl) || fallbackIdentity(b.name, b.address)
 }
 
 function existingIdentities(rows: string[][], map: HeaderMap): Set<string> {
   const seen = new Set<string>()
   for (const row of rows) {
+    // Register BOTH identities per row: incoming businesses without a Google mapsUrl
+    // (e.g. CSV imports) dedup by name|address, and must still match rows that were
+    // written with a placeId.
     if (map.mapsUrlIndex >= 0) {
       const id = placeIdFromUrl(row[map.mapsUrlIndex] ?? '')
-      if (id) { seen.add(id); continue }
+      if (id) seen.add(id)
     }
-    // Fall back to name+address when the tab has no mapsUrl column, or the cell is blank.
     const name = map.nameIndex >= 0 ? row[map.nameIndex] ?? '' : ''
     const address = map.addressIndex >= 0 ? row[map.addressIndex] ?? '' : ''
-    if (name || address) seen.add(`${name}|${address}`.toLowerCase())
+    if (name || address) seen.add(fallbackIdentity(name, address))
   }
   return seen
 }
