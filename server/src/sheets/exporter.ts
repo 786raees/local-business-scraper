@@ -1,7 +1,9 @@
 import { Business, ExportResult } from '../types.js'
 import { SheetsClient } from './client.js'
 import { buildHeaderMap, businessToRow, columnLetter, HeaderMap } from './mapping.js'
-import { TEMPLATE_HEADERS, buildTemplateRequests, buildOutreachFormula } from './sheetTemplate.js'
+import {
+  TEMPLATE_HEADERS, buildTemplateRequests, buildOutreachFormula, clearConditionalFormatRequests,
+} from './sheetTemplate.js'
 import { placeIdFromUrl } from '../scraper/listingParser.js'
 
 /** Sheets caps a spreadsheet at 10M cells; append degrades well before that. */
@@ -55,7 +57,13 @@ async function buildTab(
   client: SheetsClient, spreadsheetId: string, sheetTitle: string, sheetId: number,
 ): Promise<string[]> {
   await client.updateValues(spreadsheetId, `'${sheetTitle}'!A1`, [TEMPLATE_HEADERS])
-  await client.batchUpdate(spreadsheetId, buildTemplateRequests(sheetId))
+  // Clear any pre-existing rules first — otherwise the template's rules are appended
+  // to stale ones that may point at columns this layout repurposes.
+  const existingRules = await client.conditionalFormatCount(spreadsheetId, sheetId)
+  await client.batchUpdate(spreadsheetId, [
+    ...clearConditionalFormatRequests(sheetId, existingRules),
+    ...buildTemplateRequests(sheetId),
+  ])
   return TEMPLATE_HEADERS
 }
 

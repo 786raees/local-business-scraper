@@ -18,6 +18,7 @@ function fakeClient(over: Record<string, unknown> = {}) {
     appendValues: vi.fn(async () => undefined),
     updateValues: vi.fn(async () => undefined),
     clearValues: vi.fn(async () => undefined),
+    conditionalFormatCount: vi.fn(async () => 14),
     batchUpdate: vi.fn(async () => ({ replies: [{ addSheet: { properties: { sheetId: 99 } } }] })),
     ...over,
   }
@@ -85,6 +86,18 @@ describe('exportToSheet', () => {
     const ranges = client.updateValues.mock.calls.map((c) => c[1])
     expect(ranges.some((r) => String(r).includes('A1'))).toBe(true)
     expect(ranges.some((r) => String(r).includes('H2'))).toBe(true)
+  })
+
+  it('deletes stale conditional-format rules before applying the template', async () => {
+    const client = fakeClient({ getValues: vi.fn(async () => []) })
+    await exportToSheet(deps([business(1)], client), { spreadsheetId: 'sid', sheetTitle: 'Faizan' })
+    const reqs = client.batchUpdate.mock.calls.flatMap((c) => c[1] as Record<string, any>[])
+    const deletes = reqs.filter((r) => r.deleteConditionalFormatRule)
+    expect(deletes).toHaveLength(14)
+    // every delete must precede the first added rule
+    const firstAdd = reqs.findIndex((r) => r.addConditionalFormatRule)
+    const lastDelete = reqs.map((r) => !!r.deleteConditionalFormatRule).lastIndexOf(true)
+    expect(lastDelete).toBeLessThan(firstAdd)
   })
 
   it('creates a new tab when asked', async () => {

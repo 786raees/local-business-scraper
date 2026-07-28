@@ -3,11 +3,16 @@
  * + 23 Atlas fields) to the five-channel model defined in sheetTemplate.ts.
  *
  * Usage: npx tsx scripts/migrate-sheet.ts <spreadsheetId> <tabTitle> [--dry-run]
+ *
+ * --restyle re-applies the template (styling, dropdowns, colour rules, Outreach
+ * formula) to an already-migrated tab without touching any values. Use it after
+ * changing sheetTemplate.ts.
  */
 import { SheetsAuth } from '../src/sheets/auth.js'
 import { SheetsClient } from '../src/sheets/client.js'
 import {
   TEMPLATE_HEADERS, CRM_HEADERS, buildOutreachFormula, buildTemplateRequests,
+  clearConditionalFormatRequests,
 } from '../src/sheets/sheetTemplate.js'
 import { columnLetter, buildHeaderMap } from '../src/sheets/mapping.js'
 
@@ -27,6 +32,28 @@ export function migrateLegacyStatus(status: string): { stage: string; call: stri
   }
 }
 
+/**
+ * Reapply styling to an already-migrated tab without touching values.
+ * Stale conditional-format rules are deleted first — applying the template on top of
+ * existing rules otherwise leaves old ones pointing at repurposed columns.
+ */
+async function restyle(
+  client: SheetsClient, spreadsheetId: string, tabTitle: string, sheetId: number,
+): Promise<void> {
+  const existingRules = await client.conditionalFormatCount(spreadsheetId, sheetId)
+  await client.batchUpdate(spreadsheetId, [
+    ...clearConditionalFormatRequests(sheetId, existingRules),
+    ...buildTemplateRequests(sheetId),
+  ])
+  const map = buildHeaderMap(TEMPLATE_HEADERS)
+  const col = columnLetter(map.outreachIndex)
+  const letters = map.channelIndexes.map((i) => (i >= 0 ? columnLetter(i) : ''))
+  await client.clearValues(spreadsheetId, `'${tabTitle}'!${col}2:${col}`)
+  await client.updateValues(spreadsheetId, `'${tabTitle}'!${col}2`, [[buildOutreachFormula(letters)]])
+  const after = await client.conditionalFormatCount(spreadsheetId, sheetId)
+  console.log(`${tabTitle}: restyled — cleared ${existingRules} stale rules, now ${after}`)
+}
+
 async function main(): Promise<void> {
   const [spreadsheetId, tabTitle] = process.argv.slice(2)
   const dryRun = process.argv.includes('--dry-run')
@@ -44,6 +71,11 @@ async function main(): Promise<void> {
   const header = rows[0] ?? []
   const body = rows.slice(1)
   const idx = (name: string) => header.findIndex((h) => h.trim().toLowerCase() === name.toLowerCase())
+
+  if (process.argv.includes('--restyle')) {
+    await restyle(client, spreadsheetId, tabTitle, tab.sheetId)
+    return
+  }
 
   const statusCol = idx('Status')
   const priorityCol = idx('Priority')
@@ -104,7 +136,14 @@ async function main(): Promise<void> {
   if (migrated.length) {
     await client.updateValues(spreadsheetId, `'${tabTitle}'!A2`, migrated)
   }
-  await client.batchUpdate(spreadsheetId, buildTemplateRequests(tab.sheetId))
+  // Strip pre-existing rules first, or the template's rules are appended to stale
+  // ones that now point at repurposed columns.
+  const existingRules = await client.conditionalFormatCount(spreadsheetId, tab.sheetId)
+  await client.batchUpdate(spreadsheetId, [
+    ...clearConditionalFormatRequests(tab.sheetId, existingRules),
+    ...buildTemplateRequests(tab.sheetId),
+  ])
+  console.log(`  cleared ${existingRules} pre-existing conditional-format rules`)
 
   // Outreach formula last, and only after clearing — cells written as "" are
   // occupied and would make the ARRAYFORMULA fail with #REF!.

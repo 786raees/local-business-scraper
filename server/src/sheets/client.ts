@@ -61,6 +61,16 @@ export class SheetsClient {
     }))
   }
 
+  /** How many conditional-format rules a sheet currently has. */
+  async conditionalFormatCount(spreadsheetId: string, sheetId: number): Promise<number> {
+    const fields = encodeURIComponent('sheets(properties.sheetId,conditionalFormats)')
+    const body = await this.request<{
+      sheets?: { properties: { sheetId: number }; conditionalFormats?: unknown[] }[]
+    }>(`${SHEETS}/${spreadsheetId}?fields=${fields}`)
+    const sheet = (body.sheets ?? []).find((s) => s.properties.sheetId === sheetId)
+    return sheet?.conditionalFormats?.length ?? 0
+  }
+
   async getValues(spreadsheetId: string, range: string): Promise<string[][]> {
     const body = await this.request<{ values?: string[][] }>(
       `${SHEETS}/${spreadsheetId}/values/${encodeURIComponent(range)}`)

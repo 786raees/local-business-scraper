@@ -123,6 +123,19 @@ const border = (color: string) => Object.fromEntries(
   ['top', 'bottom', 'left', 'right'].map((k) => [k, { style: 'SOLID', color: rgb(color) }]),
 )
 
+/**
+ * Requests that strip every existing conditional-format rule from a sheet.
+ *
+ * Applying the template to a tab that already had rules otherwise *appends* to them,
+ * leaving stale rules pointing at repurposed columns (e.g. old Priority 1-4 colours
+ * sitting on what is now Call Status). Deleting index 0 repeatedly clears the list.
+ */
+export function clearConditionalFormatRequests(sheetId: number, existingRuleCount: number): unknown[] {
+  return Array.from({ length: existingRuleCount }, () => ({
+    deleteConditionalFormatRule: { sheetId, index: 0 },
+  }))
+}
+
 /** Everything needed to turn a bare tab into a styled Atlas lead tab. */
 export function buildTemplateRequests(sheetId: number): unknown[] {
   const width = TEMPLATE_HEADERS.length
