@@ -40,7 +40,29 @@ Data flows in one direction: **job request → queue → scraper → SQLite → 
   `RouteDeps` interface — keep them decoupled from concrete classes for testability.
 
 - **Job model:** a job = `keywords[] × locations[]`. `JobRunner` (`queue/jobRunner.ts`) expands these
-  into one sequential task per (keyword × location) and runs them with an `AbortController` for stop.
+  into sequential tasks and runs them with an `AbortController` for stop.
+
+- **Grid segmentation is how yield is maximised.** A Google Maps text search returns at most ~120
+  results for an area no matter its true size, so scraping a city as one query silently truncates.
+  When `JobSettings.segment` is on, `expandSegmentedTasks` geocodes each location
+  (`geo/geocode.ts` → Nominatim) and tiles its bounding box (`geo/grid.ts`) into one task per map
+  viewport, each scraped via a `/@lat,lng,Nz` URL (`scraper/searchUrl.ts`). Measured: "dentist" in
+  London returns 67 rows unsegmented, 197 from just two 5km tiles. Rules that fall out:
+  1. **Tiles overlap by design**, so dedup is mandatory — identity is `Business.placeId`, Google's
+     canonical place id parsed from the `!19s` URL segment. `ResultsStore.insert` upserts on it and
+     returns whether the row was new; only new rows increment the UI count.
+  2. **Longitude spacing must be computed per latitude row.** A degree of longitude is 111km at the
+     equator but 57km at Stockholm. A fixed degree step silently halves coverage across northern
+     Europe. See `kmPerDegLng` in `geo/grid.ts`.
+  3. **Over `maxTiles`, the grid coarsens rather than truncating.** Truncation returns the bounding
+     box's south-west corner — capping a London grid at 3 tiles once returned Woking dentists.
+  4. `geocode.ts` uses Nominatim's **structured** params, never free-text `q`: "Berlin, Berlin,
+     Germany" as free text resolves to a street, "Madrid, Madrid, Spain" to the national library.
+
+- **Non-US scraping depends on `hl=en&gl=us`** being on every Maps URL. Without it Google localizes
+  the UI and aria-labels become "Bewertung"/"Sterne" or "Note"/"avis", so `parseRating`'s `/star/i`
+  and `/review/i` never match and every European row comes back with a null rating. Rating and review
+  count live in **two sibling aria-labels** under `div.F7nice` — both must be read and joined.
 
 - **Scraper pipeline** (`server/src/scraper/`): `mapsScraper.ts` drives Playwright (scroll feed →
   visit each detail page). Optional enrichment, controlled by `JobSettings`, runs in the same browser:
@@ -56,7 +78,35 @@ Data flows in one direction: **job request → queue → scraper → SQLite → 
   `COLUMNS`, the `CREATE TABLE`, the `added` migration list, and `toBusiness`. Sorting is restricted to
   the `SORTABLE` allowlist to prevent SQL injection via the `sortBy` query param.
 
-- **Geo** (`server/src/geo/`): `geoData.ts` uses `country-state-city`; `zipLookup.ts` calls Zippopotam
+- **Google Sheets export** (`server/src/sheets/`): pushes results into a chosen tab of a
+  spreadsheet **shared with the service account** (Drive only lists those). Auth is a self-signed
+  JWT (`auth.ts`) on `node:crypto` — no SDK, no new dependency. **`sheetTemplate.ts` is the single
+  source of truth for sheet look and feel** (the Sheets analogue of `selectors.ts`): the 33 headers,
+  the five outreach channel vocabularies, colours, dropdowns and conditional formats. Rules that
+  fall out, each learned by breaking something:
+  1. Columns are matched to `Business` fields **by header name, never by position**, so a tab's CRM
+     columns survive an export. Reserved CRM headers resolve *before* Atlas fields — the channel
+     columns are `FB Status`/`IG Status`/`LI Status` precisely because `Facebook`/`Instagram`/
+     `LinkedIn` would collide with the existing URL fields under case-insensitive matching.
+  2. The `Outreach` column holds a whole-column `ARRAYFORMULA` summarising all five channels.
+     `values:append` writes the full row width, so it **overwrites that formula every time**. The
+     formula is therefore (re)installed *after* appending — and the column must be **cleared first**,
+     because cells appended as `""` still count as occupied and the array yields `#REF!`.
+  3. Applying the template **appends** conditional-format rules rather than replacing them. Always
+     delete existing rules first (`clearConditionalFormatRequests`) or stale rules stay pointing at
+     repurposed columns. `scripts/migrate-sheet.ts --restyle` reapplies the template safely.
+  4. Writes use `valueInputOption=RAW`. `USER_ENTERED` makes Sheets parse a leading-`+` phone number
+     as a formula. The sole exception is installing the `ARRAYFORMULA` itself.
+  5. Exports are capped at 50k rows (`MAX_EXPORT_ROWS`), checked *before* any write — Sheets caps a
+     spreadsheet at 10M cells, and a half-written sheet is worse than a refusal. CSV handles larger.
+  6. `Stage` (where the deal is) and the per-channel statuses are **orthogonal**. The dashboard's
+     contact rate counts a non-empty `Outreach`, not `Status LIKE "Called*"`, which would describe
+     only one of five channels.
+
+- **Geo** (`server/src/geo/`): `geoData.ts` uses `country-state-city` — but that package maps cities
+  onto only a handful of subdivisions for most non-US countries (GB: 3871 cities across 4 of its 247
+  states), so `listStates` filters out subdivisions with no cities and memoizes the result (the scan
+  costs ~3s for GB). `zipLookup.ts` calls Zippopotam
   (`api.zippopotam.us/{cc}/{state}/{city}` — lowercase 2-letter codes) and caches JSON in
   `server/.geo-cache/`. WHOIS results cache in `server/.whois-cache/`.
 
