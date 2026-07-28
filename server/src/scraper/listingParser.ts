@@ -1,3 +1,29 @@
+/**
+ * Google renders a Material icon before the address/phone/hours text, and its ligature
+ * codepoint lands in innerText as a Private Use Area character (U+E0C8 address,
+ * U+E0B0 phone). These are not whitespace, so trim() cannot remove them — they must be
+ * stripped explicitly or they end up in the DB, the CSV, and every Sheets export.
+ */
+export function cleanText(s: string): string {
+  return s
+    .replace(/[\ue000-\uf8ff]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * Google's canonical place id, pulled from the `!19s` segment of a Maps place URL.
+ * This is the only stable identity across map viewports — the rest of the URL embeds
+ * the current map centre, so the same business yields different URLs from different
+ * grid tiles. Older/short URLs fall back to the `!1s` hex feature id.
+ */
+export function placeIdFromUrl(url: string): string {
+  if (!url) return ''
+  return url.match(/!19s([^!?&]+)/)?.[1]
+    ?? url.match(/!1s(0x[0-9a-f]+:0x[0-9a-f]+)/i)?.[1]
+    ?? ''
+}
+
 export function parseRating(aria: string): { rating: number | null; reviewCount: number | null } {
   if (!aria) return { rating: null, reviewCount: null }
   const ratingMatch = aria.match(/([0-9]+(?:\.[0-9]+)?)\s*star/i)

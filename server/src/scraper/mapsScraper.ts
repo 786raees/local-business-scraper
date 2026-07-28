@@ -1,14 +1,15 @@
 import { chromium, Browser, BrowserContext, Page } from 'playwright'
 import { Business, JobSettings, emptyBusiness } from '../types.js'
 import { SELECTORS } from './selectors.js'
-import { parseRating, parsePriceLevel } from './listingParser.js'
+import { parseRating, parsePriceLevel, placeIdFromUrl, cleanText } from './listingParser.js'
+import { buildSearchUrl, jitter } from './searchUrl.js'
+import { Viewport } from '../geo/grid.js'
 import { scrapeWebsite } from './siteScraper.js'
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
 
 function delay(min: number, max: number): Promise<void> {
-  const ms = min + Math.floor((max - min) * 0.5)
-  return new Promise((r) => setTimeout(r, ms))
+  return new Promise((r) => setTimeout(r, jitter(min, max)))
 }
 
 async function dismissConsent(page: Page): Promise<void> {
@@ -41,7 +42,7 @@ async function scrollFeed(page: Page, maxResults: number, signal?: AbortSignal):
 async function textOrEmpty(page: Page, selector: string): Promise<string> {
   try {
     const el = page.locator(selector).first()
-    if (await el.count()) return (await el.innerText()).trim()
+    if (await el.count()) return cleanText(await el.innerText())
   } catch { /* ignore */ }
   return ''
 }
@@ -49,6 +50,7 @@ async function textOrEmpty(page: Page, selector: string): Promise<string> {
 async function scrapeDetail(page: Page, url: string, keyword: string, location: string): Promise<Business> {
   const b = emptyBusiness(keyword, location)
   b.mapsUrl = url
+  b.placeId = placeIdFromUrl(url)
   await page.goto(url, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector(SELECTORS.detailName, { timeout: 15000 }).catch(() => {})
   b.name = await textOrEmpty(page, SELECTORS.detailName)
@@ -62,8 +64,13 @@ async function scrapeDetail(page: Page, url: string, keyword: string, location: 
     if (await w.count()) b.website = (await w.getAttribute('href')) ?? ''
   } catch { /* ignore */ }
   try {
-    const aria = await page.locator(SELECTORS.detailRatingAria).first().getAttribute('aria-label')
-    const parsed = parseRating(aria ?? '')
+    // Maps puts the rating and the review count in two sibling aria-labels
+    // ("4.6 stars " and "263 reviews"), so both must be collected — reading only the
+    // first yields a rating with a permanently null review count.
+    const labels = await page.locator(SELECTORS.detailRatingAria).evaluateAll(
+      (els) => els.map((e) => e.getAttribute('aria-label') ?? ''),
+    )
+    const parsed = parseRating(labels.join(' '))
     b.rating = parsed.rating; b.reviewCount = parsed.reviewCount
   } catch { /* ignore */ }
   return b
@@ -75,14 +82,17 @@ export async function scrapeMaps(
   settings: JobSettings,
   onRow: (b: Business) => void,
   signal?: AbortSignal,
+  viewport?: Viewport,
 ): Promise<Business[]> {
-  const query = `${keyword} ${location}`.trim()
+  // With a viewport the map itself defines the area, so the location text is omitted —
+  // leaving it in would make Google re-centre on the named place and undo the tiling.
+  const query = viewport ? keyword : `${keyword} ${location}`.trim()
   const browser: Browser = await chromium.launch({ headless: settings.headless })
   const out: Business[] = []
   try {
     const ctx = await browser.newContext({ userAgent: UA, locale: 'en-US' })
     const page = await ctx.newPage()
-    await page.goto(`https://www.google.com/maps/search/${encodeURIComponent(query)}`, { waitUntil: 'domcontentloaded' })
+    await page.goto(buildSearchUrl(query, viewport), { waitUntil: 'domcontentloaded' })
     await dismissConsent(page)
     await page.waitForSelector(SELECTORS.feed, { timeout: 15000 }).catch(() => {})
     const urls = await scrollFeed(page, settings.maxResults, signal)
