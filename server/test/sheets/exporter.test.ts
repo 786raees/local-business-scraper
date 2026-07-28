@@ -264,3 +264,62 @@ describe('exportSplit', () => {
     expect(addSheet.addSheet.properties.title).toBe('Bilal')
   })
 })
+
+describe('cross-tab dedup on re-export', () => {
+  // Build a fake where each tab remembers what was appended to it, so a second
+  // export sees the first export's rows as existing data.
+  function statefulClient() {
+    const tabRows: Record<string, string[][]> = { Faizan: [], Amna: [] }
+    const client = fakeClient({
+      getTabs: vi.fn(async () => [
+        { sheetId: 5, title: 'Faizan', rowCount: 1000 },
+        { sheetId: 6, title: 'Amna', rowCount: 1000 },
+      ]),
+      getValues: vi.fn(async (_id: string, range: string) => {
+        const tab = String(range).includes('Faizan') ? 'Faizan' : 'Amna'
+        return [TEMPLATE_HEADERS, ...tabRows[tab]]
+      }),
+      appendValues: vi.fn(async (_id: string, range: string, values: string[][]) => {
+        const tab = String(range).includes('Faizan') ? 'Faizan' : 'Amna'
+        tabRows[tab].push(...values)
+      }),
+    })
+    return { client, tabRows }
+  }
+  const targets = [
+    { sheetTitle: 'Faizan', percent: 50 },
+    { sheetTitle: 'Amna', percent: 50 },
+  ]
+
+  it('never re-appends a row that already lives in another target tab', async () => {
+    const { client, tabRows } = statefulClient()
+    // First export: 4 rows -> Faizan gets 0-1, Amna gets 2-3.
+    await exportSplit(deps(Array.from({ length: 4 }, (_, i) => business(i)), client),
+      { spreadsheetId: 'sid', targets })
+    expect(tabRows.Faizan).toHaveLength(2)
+    expect(tabRows.Amna).toHaveLength(2)
+
+    // Scraper found 4 more. Naive quotas would put rows 2-3 (already in Amna)
+    // into Faizan's new 50% block.
+    const res = await exportSplit(deps(Array.from({ length: 8 }, (_, i) => business(i)), client),
+      { spreadsheetId: 'sid', targets })
+
+    // Only the 4 genuinely-new rows are written, split 50/50.
+    expect(res.perTab.map((t) => t.appended)).toEqual([2, 2])
+    expect(res.perTab.map((t) => t.skipped)).toEqual([2, 2])
+    const all = [...tabRows.Faizan, ...tabRows.Amna].map((r) => r[0])
+    expect(all).toHaveLength(8)
+    expect(new Set(all).size).toBe(8) // no name appears in both tabs
+  })
+
+  it('splits the NEW rows by percentage, not the raw scope', async () => {
+    const { client, tabRows } = statefulClient()
+    await exportSplit(deps(Array.from({ length: 4 }, (_, i) => business(i)), client),
+      { spreadsheetId: 'sid', targets })
+    // 6 rows total, 2 new -> each tab gets exactly 1 new row.
+    await exportSplit(deps(Array.from({ length: 6 }, (_, i) => business(i)), client),
+      { spreadsheetId: 'sid', targets })
+    expect(tabRows.Faizan).toHaveLength(3)
+    expect(tabRows.Amna).toHaveLength(3)
+  })
+})

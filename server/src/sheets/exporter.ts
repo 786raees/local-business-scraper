@@ -142,11 +142,19 @@ class TabWriter {
       map, existingIdentities(existing.slice(1), map))
   }
 
-  /** Dedup against this tab, buffer, flush at APPEND_BATCH. */
+  /** Does this tab already contain the business? */
+  has(b: Business): boolean {
+    return this.seen.has(identity(b))
+  }
+
+  /** Count a business as skipped because this tab already holds it. */
+  skip(): void {
+    this.skipped++
+  }
+
+  /** Buffer a (pre-deduped) row, flushing at APPEND_BATCH. */
   async write(b: Business): Promise<void> {
-    const id = identity(b)
-    if (this.seen.has(id)) { this.skipped++; return }
-    this.seen.add(id)
+    this.seen.add(identity(b))
     this.buffer.push(businessToRow(b, this.map))
     if (this.buffer.length >= APPEND_BATCH) await this.flush()
   }
@@ -176,9 +184,12 @@ export function splitQuotas(total: number, percents: number[]): number[] {
 
 /**
  * Export the scope (all rows, or the given placeIds) across one or more tabs.
- * Rows are routed sequentially in export order: the first quota-block to targets[0],
- * the next to targets[1], and so on. Dedup stays per-tab — an assigned row already
- * present in its tab is skipped, never rerouted.
+ *
+ * Dedup is checked across ALL target tabs, not just the one a row is assigned to.
+ * Quota boundaries shift between runs as the store grows, so a row that landed in
+ * tab A last export would otherwise fall in tab B's block this time and be appended
+ * there a second time. Quotas are computed over only the genuinely-new rows, then
+ * routed sequentially: the first quota-block to targets[0], the next to targets[1].
  */
 export async function exportSplit(deps: ExporterDeps, opts: SplitOptions): Promise<SplitExportResult> {
   const { client, spreadsheetId } = { client: deps.client, spreadsheetId: opts.spreadsheetId }
@@ -199,32 +210,53 @@ export async function exportSplit(deps: ExporterDeps, opts: SplitOptions): Promi
     )
   }
 
-  const quotas = splitQuotas(total, opts.targets.map((t) => t.percent))
   const tabs = await client.getTabs(spreadsheetId)
 
-  // Pull-based row stream so each target simply draws its quota in order.
+  // Open every target up front so all existing rows are known before routing —
+  // and so createNew still builds a styled tab even at a 0-row quota.
+  const writers: TabWriter[] = []
+  for (const target of opts.targets) {
+    writers.push(await TabWriter.open(client, spreadsheetId, target, tabs))
+  }
+
+  // Pull-based stream of genuinely-new rows. A row present in ANY target tab is
+  // skipped (attributed to the tab that holds it) rather than re-appended elsewhere.
   // Streams from SQLite in batches — the full result set is never held in memory.
-  function* rows(): Generator<Business> {
+  function* newRows(): Generator<Business> {
     for (const batch of deps.iterate(1000)) {
       for (const b of batch) {
         if (wanted && !wanted.has(b.placeId)) continue
+        const holder = writers.find((w) => w.has(b))
+        if (holder) { holder.skip(); continue }
         yield b
       }
     }
   }
-  const stream = rows()
+
+  // First pass: count new rows so the percentages divide what will actually be
+  // written. (Skip counts from this pass are discarded to avoid double-counting.)
+  let newTotal = 0
+  for (const batch of deps.iterate(1000)) {
+    for (const b of batch) {
+      if (wanted && !wanted.has(b.placeId)) continue
+      if (!writers.some((w) => w.has(b))) newTotal++
+    }
+  }
+
+  const quotas = splitQuotas(newTotal, opts.targets.map((t) => t.percent))
+  const stream = newRows()
 
   const summaries: TabExportSummary[] = []
-  for (let ti = 0; ti < opts.targets.length; ti++) {
-    // Open even zero-quota targets, so createNew still builds the styled tab.
-    const writer = await TabWriter.open(client, spreadsheetId, opts.targets[ti], tabs)
+  for (let ti = 0; ti < writers.length; ti++) {
     for (let assigned = 0; assigned < quotas[ti]; assigned++) {
       const next = stream.next()
       if (next.done) break
-      await writer.write(next.value)
+      await writers[ti].write(next.value)
     }
-    summaries.push(await writer.close())
   }
+  // Drain the tail so duplicates after the last new row still get their skip counted.
+  while (!stream.next().done) { /* skip attribution happens inside newRows() */ }
+  for (const w of writers) summaries.push(await w.close())
 
   return { perTab: summaries, total }
 }
