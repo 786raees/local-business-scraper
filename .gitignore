@@ -6,3 +6,9 @@ dist/
 playwright-report/
 results.db
 .whois-cache/
+.geocode-cache/
+
+# Google service-account credentials — never commit
+n8n-chatbot.json
+.google-service-account.json
+server/.google-service-account.json
