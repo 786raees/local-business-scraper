@@ -246,7 +246,7 @@ ResultsStore.iterateAll(1000)
 Memory stays bounded exactly as in the CSV path; the full result set is never held at once.
 `RAW` is required — `USER_ENTERED` would try to parse a leading-`+` phone number as a formula.
 
-**Row cap.** Google caps a spreadsheet at 10M cells (~290k rows at 34 columns), and append
+**Row cap.** Google caps a spreadsheet at 10M cells (~300k rows at 33 columns), and append
 degrades well before that. A configurable ceiling (default **50,000 rows**) is checked
 *before* any write. Over the cap, the request is refused with a message directing the user to
 CSV. Refusing up front beats a half-written sheet.

@@ -655,7 +655,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
   - `RESERVED_HEADERS: string[]`, `STAGE_VALUES: string[]`, `PRIORITY_VALUES: string[]`
   - `CHANNELS: { header: string; prefix: string; values: string[] }[]`
   - `CRM_HEADERS: string[]` (the 9 CRM columns in order)
-  - `TEMPLATE_HEADERS: string[]` (CRM + Atlas = 34 headers, `name` first)
+  - `TEMPLATE_HEADERS: string[]` (CRM + Atlas = 33 headers, `name` first)
   - `OUTREACH_FORMULA: string`
   - `buildTemplateRequests(sheetId: number): unknown[]`
 
@@ -685,7 +685,7 @@ describe('template headers', () => {
     }
   })
 
-  it('is 34 columns wide', () => {
+  it('is 33 columns wide', () => {
     expect(TEMPLATE_HEADERS).toHaveLength(ALL_COLUMNS.length + CRM_HEADERS.length)
     expect(TEMPLATE_HEADERS).toHaveLength(34)
   })
@@ -2202,7 +2202,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 ### Task 10: Migrate the existing rep tabs
 
-`Faizan` and `Amna` currently have `Status`/`Priority`/`Notes` at B/C/D and 27 columns. They need the 34-column model.
+`Faizan` and `Amna` currently have `Status`/`Priority`/`Notes` at B/C/D and 27 columns. They need the 33-column model.
 
 **Files:**
 - Create: `server/scripts/migrate-sheet.ts`
@@ -2382,7 +2382,7 @@ cd server
 npx tsx scripts/migrate-sheet.ts 1mWsyumDg3PiLgVNqE2qxALVbAbGgZ1L4gDKlGKtdDjU Faizan --dry-run
 ```
 
-Expected: reports `50 rows -> 34 columns` and prints a sample. Nothing written.
+Expected: reports `50 rows -> 33 columns` and prints a sample. Nothing written.
 
 - [ ] **Step 6: Migrate both tabs for real**
 
@@ -2391,7 +2391,7 @@ npx tsx scripts/migrate-sheet.ts 1mWsyumDg3PiLgVNqE2qxALVbAbGgZ1L4gDKlGKtdDjU Fa
 npx tsx scripts/migrate-sheet.ts 1mWsyumDg3PiLgVNqE2qxALVbAbGgZ1L4gDKlGKtdDjU Amna
 ```
 
-Then open the spreadsheet and confirm: 34 columns, `Stage` dropdown works, five channel dropdowns work and colour correctly, `Outreach` populates when a channel value is set, and Notes/Priority survived.
+Then open the spreadsheet and confirm: 33 columns, `Stage` dropdown works, five channel dropdowns work and colour correctly, `Outreach` populates when a channel value is set, and Notes/Priority survived.
 
 > **Note:** the Dashboard tab still references the old `Status` column (`B`) and will show stale numbers until it is rebuilt. That is Task 11.
 
