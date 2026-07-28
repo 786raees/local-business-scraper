@@ -87,6 +87,18 @@ export class SheetsClient {
     )
   }
 
+  /**
+   * Empty a range completely. Needed before writing an ARRAYFORMULA: cells written
+   * as "" by values:append still count as occupied, so the array cannot expand into
+   * them and the formula yields #REF!.
+   */
+  async clearValues(spreadsheetId: string, range: string): Promise<void> {
+    await this.request(
+      `${SHEETS}/${spreadsheetId}/values/${encodeURIComponent(range)}:clear`,
+      { method: 'POST' },
+    )
+  }
+
   async batchUpdate(spreadsheetId: string, requests: unknown[]): Promise<{ replies: unknown[] }> {
     return this.request(`${SHEETS}/${spreadsheetId}:batchUpdate`, {
       method: 'POST',

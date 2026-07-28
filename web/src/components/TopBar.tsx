@@ -1,8 +1,11 @@
+import { useState } from 'react'
 import { useStore } from '../lib/store'
 import { api } from '../lib/api'
+import { ExportDialog } from './ExportDialog'
 
 export function TopBar() {
-  const { keywords, locations, settings, total, progress, queue, running, setRunning, reset } = useStore()
+  const { keywords, locations, settings, total, duplicates, progress, running, setRunning, reset } = useStore()
+  const [exportOpen, setExportOpen] = useState(false)
   const start = async () => {
     reset(); setRunning(true)
     await api.startJob({ keywords, locations, settings })
@@ -14,18 +17,16 @@ export function TopBar() {
     reset()
   }
 
-  // Record-level progress: completed tasks count fully, plus the fraction of the
-  // in-progress task's records against maxResults. Reaches 100% when all tasks finish.
-  const finishedRecords = queue
-    .filter((q) => q.status === 'done' || q.status === 'error')
-    .reduce((sum, q) => sum + q.count, 0)
-  const currentRecords = Math.max(0, total - finishedRecords)
-  const currentFraction = settings.maxResults > 0 ? Math.min(1, currentRecords / settings.maxResults) : 0
-  const tasksProgress = progress.done + (progress.done < progress.total ? currentFraction : 0)
-  const pct = progress.total ? Math.min(100, Math.round((tasksProgress / progress.total) * 100)) : 0
+  // maxResults is a whole-job budget, so rows-against-budget is the truest measure of
+  // how far along the run is. A job can also end early by exhausting its tiles, so take
+  // whichever of the two is further along rather than stalling the bar at neither.
+  const rowsPct = settings.maxResults > 0 ? (total / settings.maxResults) * 100 : 0
+  const tasksPct = progress.total ? (progress.done / progress.total) * 100 : 0
+  const pct = Math.min(100, Math.round(Math.max(rowsPct, tasksPct)))
   const canStart = !running && keywords.length > 0 && locations.length > 0
 
   return (
+    <>
     <header className="contour relative border-b border-line bg-ink-900/80">
       <div className="flex items-center gap-5 px-5 py-3">
         <div className="flex items-center gap-3">
@@ -66,21 +67,28 @@ export function TopBar() {
           </div>
           <span className="whitespace-nowrap font-mono text-xs text-muted">
             <span className="text-teal">{total.toLocaleString()}</span> rows
+            {duplicates > 0 && (
+              <>
+                <span className="px-1.5 text-line">·</span>
+                <span title="Repeat sightings merged across overlapping grid tiles">
+                  {duplicates.toLocaleString()} dupes merged
+                </span>
+              </>
+            )}
             <span className="px-1.5 text-line">·</span>
-            {progress.done}/{progress.total} tasks
+            {progress.done}/{progress.total} {settings.segment ? 'tiles' : 'tasks'}
           </span>
         </div>
 
-        <a
-          href={total ? api.exportCsvUrl() : undefined}
-          download
-          aria-disabled={!total}
-          onClick={(e) => { if (!total) e.preventDefault() }}
-          className={`rounded-md border border-line px-3 py-1.5 text-sm font-500 text-parchment transition
-                     hover:border-teal hover:text-teal ${!total ? 'cursor-not-allowed opacity-40' : ''}`}
+        <button
+          onClick={() => setExportOpen(true)}
+          disabled={!total}
+          title={!total ? 'Nothing to export yet' : 'Export as CSV or into a Google Sheet'}
+          className="rounded-md border border-line px-3 py-1.5 text-sm font-500 text-parchment transition
+                     hover:border-teal hover:text-teal disabled:cursor-not-allowed disabled:opacity-40"
         >
-          Export CSV
-        </a>
+          Export
+        </button>
         <button
           onClick={clear}
           disabled={!total || running}
@@ -92,6 +100,8 @@ export function TopBar() {
         </button>
       </div>
     </header>
+    <ExportDialog open={exportOpen} onClose={() => setExportOpen(false)} />
+    </>
   )
 }
 

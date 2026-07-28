@@ -17,6 +17,7 @@ function fakeClient(over: Record<string, unknown> = {}) {
     getValues: vi.fn(async () => [TEMPLATE_HEADERS]),
     appendValues: vi.fn(async () => undefined),
     updateValues: vi.fn(async () => undefined),
+    clearValues: vi.fn(async () => undefined),
     batchUpdate: vi.fn(async () => ({ replies: [{ addSheet: { properties: { sheetId: 99 } } }] })),
     ...over,
   }
@@ -100,6 +101,38 @@ describe('exportToSheet', () => {
     const client = fakeClient({ getTabs: vi.fn(async () => []) })
     await expect(exportToSheet(deps([business(1)], client),
       { spreadsheetId: 'sid', sheetTitle: 'Nope' })).rejects.toThrow(/not found/i)
+  })
+
+  it('installs the Outreach ARRAYFORMULA after appending, not before', async () => {
+    const client = fakeClient()
+    const order: string[] = []
+    client.appendValues = vi.fn(async () => { order.push('append'); return undefined }) as never
+    client.updateValues = vi.fn(async (_id: string, range: string) => {
+      order.push(`update:${range}`); return undefined
+    }) as never
+    await exportToSheet(deps([business(1)], client), { spreadsheetId: 'sid', sheetTitle: 'Faizan' })
+    const lastUpdate = order.lastIndexOf(order.filter((o) => o.includes('H2')).pop() ?? '')
+    expect(order.filter((o) => o.includes('H2'))).toHaveLength(1)
+    expect(lastUpdate).toBeGreaterThan(order.indexOf('append'))
+  })
+
+  it('reinstalls the formula even on an already-formatted tab', async () => {
+    const client = fakeClient()
+    await exportToSheet(deps([business(1)], client), { spreadsheetId: 'sid', sheetTitle: 'Faizan' })
+    const ranges = client.updateValues.mock.calls.map((c) => String(c[1]))
+    expect(ranges.some((r) => r.includes('H2'))).toBe(true)
+  })
+
+  it('clears the Outreach column before writing the formula so it can expand', async () => {
+    const client = fakeClient()
+    await exportToSheet(deps([business(1)], client), { spreadsheetId: 'sid', sheetTitle: 'Faizan' })
+    expect(client.clearValues).toHaveBeenCalledWith('sid', "'Faizan'!H2:H")
+  })
+
+  it('skips the formula when the tab has no Outreach column', async () => {
+    const client = fakeClient({ getValues: vi.fn(async () => [['name', 'address', 'mapsUrl']]) })
+    await exportToSheet(deps([business(1)], client), { spreadsheetId: 'sid', sheetTitle: 'Faizan' })
+    expect(client.updateValues).not.toHaveBeenCalled()
   })
 
   it('batches large exports into multiple append calls', async () => {

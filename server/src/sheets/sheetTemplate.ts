@@ -91,15 +91,24 @@ export const OUTREACH_COLUMN_INDEX = TEMPLATE_HEADERS.indexOf('Outreach')
 
 /**
  * One whole-column array formula, so rows appended by Atlas populate themselves.
- * Written once at H2; Atlas must never write a value into this column.
+ *
+ * Built from the target tab's *actual* channel column letters rather than assuming
+ * C..G, so it stays correct on a tab whose columns were reordered.
+ *
+ * This must be (re)installed AFTER appending rows: values:append writes the full row
+ * width, including an empty cell in the Outreach column, which would otherwise
+ * overwrite the formula and blank the column for every row.
  */
-export const OUTREACH_FORMULA =
-  '=ARRAYFORMULA(IF(A2:A="","",REGEXREPLACE(' +
-  CHANNELS.map((c, i) => {
-    const col = String.fromCharCode(67 + i) // C, D, E, F, G
-    return `IF(${col}2:${col}="","","${c.prefix}: "&${col}2:${col}&" · ")`
-  }).join('&') +
-  ',"( · )+$","")))'
+export function buildOutreachFormula(channelColumnLetters: string[]): string {
+  const parts = CHANNELS
+    .map((c, i) => ({ c, col: channelColumnLetters[i] }))
+    .filter((p) => p.col)
+    .map((p) => `IF(${p.col}2:${p.col}="","","${p.c.prefix}: "&${p.col}2:${p.col}&" · ")`)
+  return '=ARRAYFORMULA(IF(A2:A="","",REGEXREPLACE(' + parts.join('&') + ',"( · )+$","")))'
+}
+
+/** The formula for the canonical template layout (channels at C..G). */
+export const OUTREACH_FORMULA = buildOutreachFormula(['C', 'D', 'E', 'F', 'G'])
 
 const COLUMN_WIDTHS = [
   250,                       // name

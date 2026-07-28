@@ -1,6 +1,6 @@
 import { Business } from '../types.js'
 import { ALL_COLUMNS } from '../export/csv.js'
-import { RESERVED_HEADERS } from './sheetTemplate.js'
+import { RESERVED_HEADERS, CHANNELS } from './sheetTemplate.js'
 import { cleanText } from '../scraper/listingParser.js'
 
 export interface HeaderMap {
@@ -13,6 +13,8 @@ export interface HeaderMap {
   mapsUrlIndex: number
   nameIndex: number
   addressIndex: number
+  /** Column index of each CHANNELS entry, in CHANNELS order; -1 when absent. */
+  channelIndexes: number[]
 }
 
 /** 0 -> A, 25 -> Z, 26 -> AA. */
@@ -55,6 +57,7 @@ export function buildHeaderMap(headerRow: string[]): HeaderMap {
     mapsUrlIndex: fields.indexOf('mapsUrl'),
     nameIndex: fields.indexOf('name'),
     addressIndex: fields.indexOf('address'),
+    channelIndexes: CHANNELS.map((c) => indexOfHeader(c.header)),
   }
 }
 

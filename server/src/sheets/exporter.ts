@@ -1,7 +1,7 @@
 import { Business, ExportResult } from '../types.js'
 import { SheetsClient } from './client.js'
 import { buildHeaderMap, businessToRow, columnLetter, HeaderMap } from './mapping.js'
-import { TEMPLATE_HEADERS, buildTemplateRequests, OUTREACH_FORMULA } from './sheetTemplate.js'
+import { TEMPLATE_HEADERS, buildTemplateRequests, buildOutreachFormula } from './sheetTemplate.js'
 import { placeIdFromUrl } from '../scraper/listingParser.js'
 
 /** Sheets caps a spreadsheet at 10M cells; append degrades well before that. */
@@ -50,16 +50,35 @@ function existingIdentities(rows: string[][], map: HeaderMap): Set<string> {
   return seen
 }
 
-/** Turn a bare/empty tab into a fully styled Atlas lead tab. */
+/** Turn a bare/empty tab into a fully styled Atlas lead tab (header + styling only). */
 async function buildTab(
   client: SheetsClient, spreadsheetId: string, sheetTitle: string, sheetId: number,
 ): Promise<string[]> {
   await client.updateValues(spreadsheetId, `'${sheetTitle}'!A1`, [TEMPLATE_HEADERS])
   await client.batchUpdate(spreadsheetId, buildTemplateRequests(sheetId))
-  // USER_ENTERED (inside updateValues) so this lands as a formula, not literal text.
-  const outreachCol = columnLetter(TEMPLATE_HEADERS.indexOf('Outreach'))
-  await client.updateValues(spreadsheetId, `'${sheetTitle}'!${outreachCol}2`, [[OUTREACH_FORMULA]])
   return TEMPLATE_HEADERS
+}
+
+/**
+ * (Re)install the whole-column Outreach ARRAYFORMULA.
+ *
+ * Must run AFTER appending: values:append writes the full row width including an empty
+ * Outreach cell, which overwrites the formula at row 2 and blanks the column entirely.
+ */
+async function installOutreachFormula(
+  client: SheetsClient, spreadsheetId: string, sheetTitle: string, map: HeaderMap,
+): Promise<void> {
+  if (map.outreachIndex < 0) return
+  const letters = map.channelIndexes.map((i) => (i >= 0 ? columnLetter(i) : ''))
+  if (!letters.some(Boolean)) return
+  const col = columnLetter(map.outreachIndex)
+  // Cells the append wrote as "" still count as occupied, which would make the
+  // ARRAYFORMULA fail with #REF! rather than expanding. Clear the column first.
+  await client.clearValues(spreadsheetId, `'${sheetTitle}'!${col}2:${col}`)
+  // updateValues uses USER_ENTERED so this lands as a formula, not literal text.
+  await client.updateValues(
+    spreadsheetId, `'${sheetTitle}'!${col}2`, [[buildOutreachFormula(letters)]],
+  )
 }
 
 export async function exportToSheet(deps: ExporterDeps, opts: ExportOptions): Promise<ExportResult> {
@@ -129,6 +148,9 @@ export async function exportToSheet(deps: ExporterDeps, opts: ExportOptions): Pr
     }
   }
   await flush()
+
+  // Always last: the appends above blank the Outreach cell on every row they write.
+  await installOutreachFormula(client, spreadsheetId, opts.sheetTitle, map)
 
   return { appended, skipped, total }
 }
