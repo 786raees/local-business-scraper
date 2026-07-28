@@ -8,8 +8,8 @@ import { scrapeMaps } from './scraper/mapsScraper.js'
 import { ResultsStore } from './db/store.js'
 import { SheetsAuth } from './sheets/auth.js'
 import { SheetsClient } from './sheets/client.js'
-import { exportToSheet } from './sheets/exporter.js'
-import { JobSettings, LocationSpec, JobEvent } from './types.js'
+import { exportSplit } from './sheets/exporter.js'
+import { JobSettings, LocationSpec, JobEvent, ExportTarget } from './types.js'
 
 const store = new ResultsStore('results.db')
 
@@ -62,6 +62,7 @@ const app = createApp({
   results: {
     page: (offset, limit, filter) => store.queryPage(offset, limit, filter),
     count: (filter) => store.count(filter),
+    ids: (offset, limit, filter) => store.queryIds(offset, limit, filter),
     iterate: (batch) => store.iterateAll(batch),
     clear: () => { store.reset(); inserted = 0; duplicates = 0 },
   },
@@ -78,10 +79,10 @@ const app = createApp({
     clientEmail: () => sheetsAuth.clientEmail(),
     listSpreadsheets: () => sheetsClient.listSpreadsheets(),
     listTabs: (id: string) => sheetsClient.getTabs(id),
-    exportTo: (spreadsheetId: string, sheetTitle: string, createNew: boolean) =>
-      exportToSheet(
+    exportTo: (spreadsheetId: string, targets: ExportTarget[], placeIds?: string[]) =>
+      exportSplit(
         { client: sheetsClient, iterate: (b) => store.iterateAll(b), count: () => store.count({}) },
-        { spreadsheetId, sheetTitle, createNew },
+        { spreadsheetId, targets, placeIds },
       ),
   },
 })

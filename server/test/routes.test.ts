@@ -18,6 +18,7 @@ function makeDeps() {
     results: {
       page: (offset: number, limit: number) => rows.slice(offset, offset + limit),
       count: () => rows.length,
+      ids: (offset: number, limit: number) => rows.slice(offset, offset + limit).map((r) => r.placeId),
       *iterate() { yield rows },
       cleared: false,
       clear() { this.cleared = true },
@@ -28,7 +29,7 @@ function makeDeps() {
       clientEmail: () => 'svc@example.iam.gserviceaccount.com',
       listSpreadsheets: async () => [{ id: 'a', name: 'Plumber leads' }],
       listTabs: async () => [{ sheetId: 1, title: 'Faizan', rowCount: 51 }],
-      exportTo: async () => ({ appended: 112, skipped: 38, total: 150 }),
+      exportTo: async () => ({ perTab: [{ sheetTitle: 'Faizan', appended: 112, skipped: 38 }], total: 150 }),
     },
   }
 }
@@ -89,22 +90,44 @@ describe('sheets routes', () => {
   it('exports and returns the summary', async () => {
     const res = await request(createApp(makeDeps() as any))
       .post('/api/export/sheets')
-      .send({ spreadsheetId: 'abc', sheetTitle: 'Faizan' })
+      .send({ spreadsheetId: 'abc', targets: [{ sheetTitle: 'Faizan', percent: 100 }] })
     expect(res.status).toBe(200)
-    expect(res.body).toEqual({ appended: 112, skipped: 38, total: 150 })
+    expect(res.body).toEqual({ perTab: [{ sheetTitle: 'Faizan', appended: 112, skipped: 38 }], total: 150 })
   })
 
   it('rejects an export with no spreadsheetId', async () => {
     const res = await request(createApp(makeDeps() as any))
-      .post('/api/export/sheets').send({ sheetTitle: 'Faizan' })
+      .post('/api/export/sheets').send({ targets: [{ sheetTitle: 'Faizan', percent: 100 }] })
     expect(res.status).toBe(400)
+  })
+
+  it('rejects percentages that do not total 100', async () => {
+    const res = await request(createApp(makeDeps() as any))
+      .post('/api/export/sheets')
+      .send({ spreadsheetId: 'abc', targets: [{ sheetTitle: 'Faizan', percent: 50 }, { sheetTitle: 'Amna', percent: 40 }] })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/sum to 90/)
+  })
+
+  it('rejects duplicate target tabs', async () => {
+    const res = await request(createApp(makeDeps() as any))
+      .post('/api/export/sheets')
+      .send({ spreadsheetId: 'abc', targets: [{ sheetTitle: 'Faizan', percent: 50 }, { sheetTitle: 'Faizan', percent: 50 }] })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/distinct/)
+  })
+
+  it('lists placeIds for the current query', async () => {
+    const res = await request(createApp(makeDeps() as any)).get('/api/results/ids?offset=0&limit=10')
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveLength(2)
   })
 
   it('surfaces the service-account address on a 403 from Google', async () => {
     const deps = makeDeps()
     deps.sheets.exportTo = async () => { throw Object.assign(new Error('denied'), { status: 403 }) }
     const res = await request(createApp(deps as any))
-      .post('/api/export/sheets').send({ spreadsheetId: 'abc', sheetTitle: 'Faizan' })
+      .post('/api/export/sheets').send({ spreadsheetId: 'abc', targets: [{ sheetTitle: 'Faizan', percent: 100 }] })
     expect(res.status).toBe(403)
     expect(res.body.shareWith).toBe('svc@example.iam.gserviceaccount.com')
   })
@@ -113,7 +136,7 @@ describe('sheets routes', () => {
     const deps = makeDeps()
     deps.sheets.exportTo = async () => { throw Object.assign(new Error('too many'), { status: 413 }) }
     const res = await request(createApp(deps as any))
-      .post('/api/export/sheets').send({ spreadsheetId: 'abc', sheetTitle: 'Faizan' })
+      .post('/api/export/sheets').send({ spreadsheetId: 'abc', targets: [{ sheetTitle: 'Faizan', percent: 100 }] })
     expect(res.status).toBe(413)
   })
 })

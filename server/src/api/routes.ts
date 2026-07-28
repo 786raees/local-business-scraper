@@ -3,7 +3,7 @@ import { Request } from 'express'
 import { csvHeaderLine, csvRows } from '../export/csv.js'
 import {
   Business, JobSettings, LocationSpec, ResultQuery,
-  SpreadsheetRef, TabRef, ExportResult, normalizeSettings,
+  SpreadsheetRef, TabRef, ExportTarget, SplitExportResult, normalizeSettings,
 } from '../types.js'
 
 function parseQuery(req: Request): ResultQuery {
@@ -33,6 +33,7 @@ export interface RouteDeps {
   results: {
     page: (offset: number, limit: number, query: ResultQuery) => Business[]
     count: (query: ResultQuery) => number
+    ids: (offset: number, limit: number, query: ResultQuery) => string[]
     iterate: (batch: number) => Generator<Business[]>
     clear: () => void
   }
@@ -43,7 +44,7 @@ export interface RouteDeps {
     clientEmail: () => string
     listSpreadsheets: () => Promise<SpreadsheetRef[]>
     listTabs: (spreadsheetId: string) => Promise<TabRef[]>
-    exportTo: (spreadsheetId: string, sheetTitle: string, createNew: boolean) => Promise<ExportResult>
+    exportTo: (spreadsheetId: string, targets: ExportTarget[], placeIds?: string[]) => Promise<SplitExportResult>
   }
 }
 
@@ -67,6 +68,13 @@ export function createApp(deps: RouteDeps): Express {
     const limit = Math.min(500, Math.max(1, Number(req.query.limit ?? 100)))
     const query = parseQuery(req)
     res.json({ rows: deps.results.page(offset, limit, query), total: deps.results.count(query) })
+  })
+
+  // placeIds in display order for the current filter/sort — powers shift-range selection.
+  app.get('/api/results/ids', (req, res) => {
+    const offset = Math.max(0, Number(req.query.offset ?? 0))
+    const limit = Math.min(50000, Math.max(1, Number(req.query.limit ?? 1000)))
+    res.json(deps.results.ids(offset, limit, parseQuery(req)))
   })
 
   app.post('/api/job/start', (req, res) => {
@@ -120,12 +128,31 @@ export function createApp(deps: RouteDeps): Express {
 
   app.post('/api/export/sheets', async (req, res) => {
     if (!requireConfigured(res)) return
-    const { spreadsheetId, sheetTitle, createNew } = req.body ?? {}
-    if (!spreadsheetId || !sheetTitle) {
-      return res.status(400).json({ error: 'spreadsheetId and sheetTitle are both required' })
+    const { spreadsheetId, targets, placeIds } = req.body ?? {}
+    if (!spreadsheetId || !Array.isArray(targets) || !targets.length) {
+      return res.status(400).json({ error: 'spreadsheetId and at least one target are required' })
+    }
+    const parsed: ExportTarget[] = targets.map((t: Record<string, unknown>) => ({
+      sheetTitle: String(t?.sheetTitle ?? ''),
+      createNew: Boolean(t?.createNew),
+      percent: Number(t?.percent),
+    }))
+    if (parsed.some((t) => !t.sheetTitle.trim() || !Number.isInteger(t.percent) || t.percent < 0)) {
+      return res.status(400).json({ error: 'each target needs a sheetTitle and a non-negative integer percent' })
+    }
+    if (new Set(parsed.map((t) => t.sheetTitle)).size !== parsed.length) {
+      return res.status(400).json({ error: 'target tabs must be distinct' })
+    }
+    const pctSum = parsed.reduce((a, t) => a + t.percent, 0)
+    if (pctSum !== 100) {
+      return res.status(400).json({ error: `target percentages sum to ${pctSum}, they must total exactly 100` })
+    }
+    const ids = Array.isArray(placeIds) ? placeIds.map(String) : undefined
+    if (ids && ids.length > 50000) {
+      return res.status(413).json({ error: 'selection exceeds the 50,000-row export limit' })
     }
     try {
-      res.json(await deps.sheets.exportTo(String(spreadsheetId), String(sheetTitle), Boolean(createNew)))
+      res.json(await deps.sheets.exportTo(String(spreadsheetId), parsed, ids))
     } catch (e) { sheetsError(res, e) }
   })
 

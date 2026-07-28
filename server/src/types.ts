@@ -171,3 +171,24 @@ export interface ExportResult {
   skipped: number
   total: number
 }
+
+/** One destination tab in a (possibly split) export. */
+export interface ExportTarget {
+  sheetTitle: string
+  createNew?: boolean
+  /** Integer share of the exported rows. All targets must sum to exactly 100. */
+  percent: number
+}
+
+/** Per-tab outcome of a split export. */
+export interface TabExportSummary {
+  sheetTitle: string
+  appended: number
+  skipped: number
+}
+
+/** Outcome of a split export. `total` is rows in the export scope. */
+export interface SplitExportResult {
+  perTab: TabExportSummary[]
+  total: number
+}

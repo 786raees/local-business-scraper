@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { exportToSheet, MAX_EXPORT_ROWS } from '../../src/sheets/exporter.js'
+import { exportToSheet, exportSplit, splitQuotas, MAX_EXPORT_ROWS } from '../../src/sheets/exporter.js'
 import { TEMPLATE_HEADERS } from '../../src/sheets/sheetTemplate.js'
 import { Business } from '../../src/types.js'
 
@@ -165,5 +165,102 @@ describe('exportToSheet', () => {
     const result = await exportToSheet(deps(rows, client), { spreadsheetId: 'sid', sheetTitle: 'Faizan' })
     expect(result.appended).toBe(12000)
     expect(client.appendValues).toHaveBeenCalledTimes(3) // 5000 + 5000 + 2000
+  })
+})
+
+describe('splitQuotas', () => {
+  it('splits exactly on round numbers', () => {
+    expect(splitQuotas(100, [50, 40, 10])).toEqual([50, 40, 10])
+  })
+  it('gives remainder rows to the first target', () => {
+    expect(splitQuotas(10, [33, 33, 34])).toEqual([3 + 1, 3, 3]) // floors 3,3,3 + 1 remainder
+  })
+  it('handles a zero-rounding target', () => {
+    expect(splitQuotas(5, [90, 10])).toEqual([5, 0])
+  })
+  it('single target takes everything', () => {
+    expect(splitQuotas(7, [100])).toEqual([7])
+  })
+})
+
+describe('exportSplit', () => {
+  it('routes sequential blocks to each target', async () => {
+    const client = fakeClient({
+      getTabs: vi.fn(async () => [
+        { sheetId: 5, title: 'Faizan', rowCount: 1000 },
+        { sheetId: 6, title: 'Amna', rowCount: 1000 },
+      ]),
+    })
+    const rows = Array.from({ length: 10 }, (_, i) => business(i))
+    const res = await exportSplit(deps(rows, client), {
+      spreadsheetId: 'sid',
+      targets: [
+        { sheetTitle: 'Faizan', percent: 50 },
+        { sheetTitle: 'Amna', percent: 50 },
+      ],
+    })
+    expect(res.total).toBe(10)
+    expect(res.perTab).toEqual([
+      { sheetTitle: 'Faizan', appended: 5, skipped: 0 },
+      { sheetTitle: 'Amna', appended: 5, skipped: 0 },
+    ])
+    // first append call went to Faizan with rows 0-4, second to Amna with rows 5-9
+    const calls = client.appendValues.mock.calls
+    expect(String(calls[0][1])).toContain('Faizan')
+    expect((calls[0][2] as string[][])[0][0]).toBe('Biz 0')
+    expect(String(calls[1][1])).toContain('Amna')
+    expect((calls[1][2] as string[][])[0][0]).toBe('Biz 5')
+  })
+
+  it('filters by placeIds when provided', async () => {
+    const client = fakeClient()
+    const rows = Array.from({ length: 10 }, (_, i) => business(i))
+    const res = await exportSplit(deps(rows, client), {
+      spreadsheetId: 'sid',
+      targets: [{ sheetTitle: 'Faizan', percent: 100 }],
+      placeIds: ['p2', 'p5', 'p7'],
+    })
+    expect(res.total).toBe(3)
+    expect(res.perTab[0].appended).toBe(3)
+    const values = client.appendValues.mock.calls[0][2] as string[][]
+    expect(values.map((v) => v[0])).toEqual(['Biz 2', 'Biz 5', 'Biz 7'])
+  })
+
+  it('rejects percentages not totalling 100', async () => {
+    await expect(exportSplit(deps([business(1)], fakeClient()), {
+      spreadsheetId: 'sid', targets: [{ sheetTitle: 'Faizan', percent: 60 }],
+    })).rejects.toMatchObject({ status: 400 })
+  })
+
+  it('checks the row cap against the selection size, not the whole store', async () => {
+    const client = fakeClient()
+    const d = { ...deps([business(1)], client), count: () => MAX_EXPORT_ROWS + 500 }
+    // selection of 1 must pass even though the store holds more than the cap
+    const res = await exportSplit(d, {
+      spreadsheetId: 'sid', targets: [{ sheetTitle: 'Faizan', percent: 100 }], placeIds: ['p1'],
+    })
+    expect(res.total).toBe(1)
+  })
+
+  it('still creates a zero-quota new tab', async () => {
+    const client = fakeClient({
+      getTabs: vi.fn(async () => [{ sheetId: 5, title: 'Faizan', rowCount: 1000 }]),
+      getValues: vi.fn(async (_id: string, range: string) =>
+        String(range).includes('Bilal') ? [] : [TEMPLATE_HEADERS]),
+    })
+    const res = await exportSplit(deps(Array.from({ length: 3 }, (_, i) => business(i)), client), {
+      spreadsheetId: 'sid',
+      targets: [
+        { sheetTitle: 'Faizan', percent: 100 },
+        { sheetTitle: 'Bilal', percent: 0, createNew: true },
+      ],
+    })
+    expect(res.perTab).toEqual([
+      { sheetTitle: 'Faizan', appended: 3, skipped: 0 },
+      { sheetTitle: 'Bilal', appended: 0, skipped: 0 },
+    ])
+    const addSheet = client.batchUpdate.mock.calls
+      .flatMap((c) => c[1] as Record<string, any>[]).find((r) => r.addSheet)
+    expect(addSheet.addSheet.properties.title).toBe('Bilal')
   })
 })

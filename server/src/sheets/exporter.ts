@@ -1,4 +1,4 @@
-import { Business, ExportResult } from '../types.js'
+import { Business, ExportResult, ExportTarget, SplitExportResult, TabExportSummary } from '../types.js'
 import { SheetsClient } from './client.js'
 import { buildHeaderMap, businessToRow, columnLetter, HeaderMap } from './mapping.js'
 import {
@@ -89,11 +89,106 @@ async function installOutreachFormula(
   )
 }
 
-export async function exportToSheet(deps: ExporterDeps, opts: ExportOptions): Promise<ExportResult> {
-  const client = deps.client
-  const spreadsheetId = opts.spreadsheetId
+export interface SplitOptions {
+  spreadsheetId: string
+  targets: ExportTarget[]
+  /** When present, only rows whose placeId is in this list are exported. */
+  placeIds?: string[]
+}
+
+/** Per-target write state: resolved tab, header map, dedup set, append buffer. */
+class TabWriter {
+  appended = 0
+  skipped = 0
+  private buffer: string[][] = []
+
+  private constructor(
+    private client: SheetsClient,
+    private spreadsheetId: string,
+    readonly sheetTitle: string,
+    private map: HeaderMap,
+    private seen: Set<string>,
+  ) {}
+
+  static async open(
+    client: SheetsClient, spreadsheetId: string, target: ExportTarget,
+    tabs: { sheetId: number; title: string }[],
+  ): Promise<TabWriter> {
+    let tab = tabs.find((t) => t.title === target.sheetTitle)
+    if (!tab) {
+      if (!target.createNew) {
+        throw new ExportError(`Tab "${target.sheetTitle}" not found in the spreadsheet.`, 404)
+      }
+      const res = await client.batchUpdate(spreadsheetId, [{
+        addSheet: {
+          properties: {
+            title: target.sheetTitle,
+            gridProperties: { rowCount: 1000, columnCount: TEMPLATE_HEADERS.length },
+          },
+        },
+      }])
+      const created = res.replies[0] as { addSheet?: { properties?: { sheetId?: number } } }
+      tab = { sheetId: created.addSheet?.properties?.sheetId ?? 0, title: target.sheetTitle }
+    }
+
+    const existing = await client.getValues(spreadsheetId, `'${target.sheetTitle}'!A1:BZ`)
+    let headerRow = existing[0] ?? []
+    // An empty tab (or one with no header) gets the full styled structure.
+    if (headerRow.filter((h) => h.trim()).length === 0) {
+      headerRow = await buildTab(client, spreadsheetId, target.sheetTitle, tab.sheetId)
+    }
+    const map = buildHeaderMap(headerRow)
+    return new TabWriter(client, spreadsheetId, target.sheetTitle,
+      map, existingIdentities(existing.slice(1), map))
+  }
+
+  /** Dedup against this tab, buffer, flush at APPEND_BATCH. */
+  async write(b: Business): Promise<void> {
+    const id = identity(b)
+    if (this.seen.has(id)) { this.skipped++; return }
+    this.seen.add(id)
+    this.buffer.push(businessToRow(b, this.map))
+    if (this.buffer.length >= APPEND_BATCH) await this.flush()
+  }
+
+  private async flush(): Promise<void> {
+    if (!this.buffer.length) return
+    await this.client.appendValues(this.spreadsheetId, `'${this.sheetTitle}'!A1`, this.buffer)
+    this.appended += this.buffer.length
+    this.buffer = []
+  }
+
+  /** Flush the tail, then reinstall the Outreach formula the appends blanked. */
+  async close(): Promise<TabExportSummary> {
+    await this.flush()
+    await installOutreachFormula(this.client, this.spreadsheetId, this.sheetTitle, this.map)
+    return { sheetTitle: this.sheetTitle, appended: this.appended, skipped: this.skipped }
+  }
+}
+
+/** floor(total × pct/100) per target; remainder rows go to the first target. */
+export function splitQuotas(total: number, percents: number[]): number[] {
+  const quotas = percents.map((p) => Math.floor((total * p) / 100))
+  const assigned = quotas.reduce((a, b) => a + b, 0)
+  if (quotas.length) quotas[0] += total - assigned
+  return quotas
+}
+
+/**
+ * Export the scope (all rows, or the given placeIds) across one or more tabs.
+ * Rows are routed sequentially in export order: the first quota-block to targets[0],
+ * the next to targets[1], and so on. Dedup stays per-tab — an assigned row already
+ * present in its tab is skipped, never rerouted.
+ */
+export async function exportSplit(deps: ExporterDeps, opts: SplitOptions): Promise<SplitExportResult> {
+  const { client, spreadsheetId } = { client: deps.client, spreadsheetId: opts.spreadsheetId }
+  if (!opts.targets.length) throw new ExportError('At least one target tab is required.', 400)
+  const pctTotal = opts.targets.reduce((a, t) => a + t.percent, 0)
+  if (pctTotal !== 100) throw new ExportError(`Target percentages sum to ${pctTotal}, not 100.`, 400)
+
+  const wanted = opts.placeIds ? new Set(opts.placeIds) : null
+  const total = wanted ? wanted.size : deps.count()
   const cap = deps.maxRows ?? MAX_EXPORT_ROWS
-  const total = deps.count()
 
   // Check the cap before any write, so we never leave a half-populated sheet.
   if (total > cap) {
@@ -104,61 +199,42 @@ export async function exportToSheet(deps: ExporterDeps, opts: ExportOptions): Pr
     )
   }
 
+  const quotas = splitQuotas(total, opts.targets.map((t) => t.percent))
   const tabs = await client.getTabs(spreadsheetId)
-  let tab = tabs.find((t) => t.title === opts.sheetTitle)
 
-  if (!tab) {
-    if (!opts.createNew) {
-      throw new ExportError(`Tab "${opts.sheetTitle}" not found in the spreadsheet.`, 404)
-    }
-    const res = await client.batchUpdate(spreadsheetId, [{
-      addSheet: {
-        properties: {
-          title: opts.sheetTitle,
-          gridProperties: { rowCount: 1000, columnCount: TEMPLATE_HEADERS.length },
-        },
-      },
-    }])
-    const created = res.replies[0] as { addSheet?: { properties?: { sheetId?: number } } }
-    tab = { sheetId: created.addSheet?.properties?.sheetId ?? 0, title: opts.sheetTitle, rowCount: 1000 }
-  }
-
-  const existing = await client.getValues(spreadsheetId, `'${opts.sheetTitle}'!A1:BZ`)
-  let headerRow = existing[0] ?? []
-
-  // An empty tab (or one with no header) gets the full styled structure.
-  if (headerRow.filter((h) => h.trim()).length === 0) {
-    headerRow = await buildTab(client, spreadsheetId, opts.sheetTitle, tab.sheetId)
-  }
-
-  const map = buildHeaderMap(headerRow)
-  const seen = existingIdentities(existing.slice(1), map)
-
-  let appended = 0
-  let skipped = 0
-  let buffer: string[][] = []
-
-  const flush = async () => {
-    if (!buffer.length) return
-    await client.appendValues(spreadsheetId, `'${opts.sheetTitle}'!A1`, buffer)
-    appended += buffer.length
-    buffer = []
-  }
-
-  // Stream from SQLite so the full result set is never held in memory.
-  for (const batch of deps.iterate(1000)) {
-    for (const b of batch) {
-      const id = identity(b)
-      if (seen.has(id)) { skipped++; continue }
-      seen.add(id)
-      buffer.push(businessToRow(b, map))
-      if (buffer.length >= APPEND_BATCH) await flush()
+  // Pull-based row stream so each target simply draws its quota in order.
+  // Streams from SQLite in batches — the full result set is never held in memory.
+  function* rows(): Generator<Business> {
+    for (const batch of deps.iterate(1000)) {
+      for (const b of batch) {
+        if (wanted && !wanted.has(b.placeId)) continue
+        yield b
+      }
     }
   }
-  await flush()
+  const stream = rows()
 
-  // Always last: the appends above blank the Outreach cell on every row they write.
-  await installOutreachFormula(client, spreadsheetId, opts.sheetTitle, map)
+  const summaries: TabExportSummary[] = []
+  for (let ti = 0; ti < opts.targets.length; ti++) {
+    // Open even zero-quota targets, so createNew still builds the styled tab.
+    const writer = await TabWriter.open(client, spreadsheetId, opts.targets[ti], tabs)
+    for (let assigned = 0; assigned < quotas[ti]; assigned++) {
+      const next = stream.next()
+      if (next.done) break
+      await writer.write(next.value)
+    }
+    summaries.push(await writer.close())
+  }
 
-  return { appended, skipped, total }
+  return { perTab: summaries, total }
+}
+
+/** Single-tab export: one target taking 100% of the scope. */
+export async function exportToSheet(deps: ExporterDeps, opts: ExportOptions): Promise<ExportResult> {
+  const res = await exportSplit(deps, {
+    spreadsheetId: opts.spreadsheetId,
+    targets: [{ sheetTitle: opts.sheetTitle, createNew: opts.createNew, percent: 100 }],
+  })
+  const t = res.perTab[0]
+  return { appended: t.appended, skipped: t.skipped, total: res.total }
 }
