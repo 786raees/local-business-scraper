@@ -1,6 +1,6 @@
 import type {
   Business, JobSettings, LocationSpec, ResultQuery,
-  SpreadsheetRef, TabRef, ExportResult, SheetsErrorBody,
+  SpreadsheetRef, TabRef, ExportTarget, SplitExportResult, SheetsErrorBody,
 } from './types'
 
 /** Throws an Error carrying the parsed body so callers can show `shareWith`. */
@@ -38,6 +38,9 @@ export const api = {
     j<{ name: string }[]>(`/api/geo/cities?country=${country}&state=${state}`),
   getZips: (country: string, state: string, city: string) =>
     j<string[]>(`/api/geo/zips?country=${country}&state=${encodeURIComponent(state)}&city=${encodeURIComponent(city)}`),
+  // placeIds in display order for the current filter/sort — powers shift-range selection.
+  getResultIds: (offset: number, limit: number, query: ResultQuery) =>
+    j<string[]>(`/api/results/ids?offset=${offset}&limit=${limit}&${queryString(query)}`),
   getResults: (offset: number, limit: number, query: ResultQuery) =>
     j<{ rows: Business[]; total: number }>(
       `/api/results?offset=${offset}&limit=${limit}&${queryString(query)}`),
@@ -51,8 +54,8 @@ export const api = {
     jsonOrThrow<SpreadsheetRef[]>(await fetch('/api/sheets/spreadsheets')),
   getTabs: async (id: string) =>
     jsonOrThrow<TabRef[]>(await fetch(`/api/sheets/${encodeURIComponent(id)}/tabs`)),
-  exportToSheet: async (payload: { spreadsheetId: string; sheetTitle: string; createNew?: boolean }) =>
-    jsonOrThrow<ExportResult>(await fetch('/api/export/sheets', {
+  exportToSheet: async (payload: { spreadsheetId: string; targets: ExportTarget[]; placeIds?: string[] }) =>
+    jsonOrThrow<SplitExportResult>(await fetch('/api/export/sheets', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),

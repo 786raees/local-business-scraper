@@ -5,6 +5,7 @@ import { ExportDialog } from './ExportDialog'
 
 export function TopBar() {
   const { keywords, locations, settings, total, duplicates, progress, running, setRunning, reset } = useStore()
+  const selectedCount = useStore((s) => s.selected.size)
   const [exportOpen, setExportOpen] = useState(false)
   const start = async () => {
     reset(); setRunning(true)
@@ -87,7 +88,7 @@ export function TopBar() {
           className="rounded-md border border-line px-3 py-1.5 text-sm font-500 text-parchment transition
                      hover:border-teal hover:text-teal disabled:cursor-not-allowed disabled:opacity-40"
         >
-          Export
+          Export{selectedCount > 0 && <span className="text-teal"> ({selectedCount.toLocaleString()} selected)</span>}
         </button>
         <button
           onClick={clear}

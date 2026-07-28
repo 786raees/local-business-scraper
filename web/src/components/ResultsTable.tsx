@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useStore } from '../lib/store'
+import { api } from '../lib/api'
 import { useResults } from '../hooks/useResults'
 import type { Business, ResultQuery } from '../lib/types'
 import { SOCIAL_FIELDS } from '../lib/types'
 
 const ROW_H = 40
-const GRID = 'minmax(150px,1.3fr) minmax(120px,1fr) minmax(95px,0.8fr) minmax(160px,1.4fr) 130px 60px minmax(150px,1.1fr) minmax(140px,1fr)'
+const GRID = '36px minmax(150px,1.3fr) minmax(120px,1fr) minmax(95px,0.8fr) minmax(160px,1.4fr) 130px 60px minmax(150px,1.1fr) minmax(140px,1fr)'
 
 type Col = { key: keyof Business; label: string; sortable: boolean }
 const COLS: Col[] = [
@@ -27,6 +28,11 @@ const RATINGS = [
 
 export function ResultsTable() {
   const liveTotal = useStore((s) => s.total)
+  const selected = useStore((s) => s.selected)
+  const lastClickedIndex = useStore((s) => s.lastClickedIndex)
+  const toggleOne = useStore((s) => s.toggleOne)
+  const setSelected = useStore((s) => s.setSelected)
+  const clearSelection = useStore((s) => s.clearSelection)
 
   const [text, setText] = useState({ q: '', category: '' })
   const [debText, setDebText] = useState(text)
@@ -65,6 +71,26 @@ export function ResultsTable() {
     setSort((s) => s.by === col.key
       ? { by: col.key, dir: s.dir === 'asc' ? 'desc' : 'asc' }
       : { by: col.key, dir: 'asc' })
+  }
+
+  // Checkbox click. Shift extends from the last-clicked row: the id range is fetched
+  // from the server in display order, so it works across rows not yet loaded by the
+  // virtualizer.
+  const onRowCheck = async (row: Business, index: number, e: React.MouseEvent) => {
+    if (e.shiftKey && lastClickedIndex !== null && lastClickedIndex !== index) {
+      const lo = Math.min(lastClickedIndex, index)
+      const ids = await api.getResultIds(lo, Math.abs(index - lastClickedIndex) + 1, query)
+      // Whole range takes the clicked checkbox's new state.
+      setSelected(ids, !selected.has(row.placeId), index)
+    } else {
+      toggleOne(row.placeId, index)
+    }
+  }
+
+  const onHeaderCheck = async () => {
+    if (selected.size > 0) { clearSelection(); return }
+    if (!total) return
+    setSelected(await api.getResultIds(0, Math.min(total, 50000), query), true)
   }
 
   const filtersActive = !!(debText.q || debText.category || flags.minRating || flags.minReviews
@@ -107,6 +133,16 @@ export function ResultsTable() {
         {/* header */}
         <div className="grid shrink-0 border-b border-line bg-ink-900/95 font-mono text-[10px] uppercase tracking-wider text-muted"
           style={{ gridTemplateColumns: GRID }}>
+          <div className="flex items-center justify-center py-2.5">
+            <input
+              type="checkbox"
+              aria-label="Select all rows"
+              checked={total > 0 && selected.size >= total}
+              ref={(el) => { if (el) el.indeterminate = selected.size > 0 && selected.size < total }}
+              onChange={onHeaderCheck}
+              className="h-3.5 w-3.5 cursor-pointer accent-[#FF6B3D]"
+            />
+          </div>
           {COLS.map((c) => (
             <button key={c.key} onClick={() => toggleSort(c)} disabled={!c.sortable}
               className={`flex items-center gap-1 px-3 py-2.5 text-left ${c.sortable ? 'hover:text-parchment' : 'cursor-default'}`}>
@@ -128,7 +164,21 @@ export function ResultsTable() {
                   <div key={vi.key}
                     className="absolute left-0 top-0 grid w-full items-center border-b border-line/50 text-sm hover:bg-ink-600/40"
                     style={{ height: ROW_H, transform: `translateY(${vi.start}px)`, gridTemplateColumns: GRID }}>
-                    {row ? <Cells row={row} /> : <Skeleton />}
+                    {row ? (
+                      <>
+                        <div className="flex items-center justify-center">
+                          <input
+                            type="checkbox"
+                            aria-label={`Select ${row.name}`}
+                            checked={selected.has(row.placeId)}
+                            onClick={(e) => { e.preventDefault(); void onRowCheck(row, vi.index, e) }}
+                            onChange={() => {}}
+                            className="h-3.5 w-3.5 cursor-pointer accent-[#FF6B3D]"
+                          />
+                        </div>
+                        <Cells row={row} />
+                      </>
+                    ) : <Skeleton />}
                   </div>
                 )
               })}
@@ -196,6 +246,7 @@ function Cell({ children, className = '' }: { children: React.ReactNode; classNa
 function Skeleton() {
   return (
     <>
+      <div />
       {COLS.map((c) => (
         <div key={c.key} className="px-3"><div className="h-3 w-3/4 animate-pulse rounded bg-ink-600" /></div>
       ))}
