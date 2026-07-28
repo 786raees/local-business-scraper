@@ -7,6 +7,8 @@ export interface LocationSpec {
 }
 
 export interface Business {
+  /** Google's canonical place id — the dedup key across overlapping grid tiles. */
+  placeId: string
   name: string
   address: string
   phone: string
@@ -39,12 +41,22 @@ export const SOCIAL_FIELDS = [
 ] as const
 
 export interface JobSettings {
+  /**
+   * Whole-job budget: the run stops once this many *unique* businesses are stored,
+   * leaving any remaining tiles unvisited. Duplicate sightings do not consume it.
+   */
   maxResults: number
   extractEmail: boolean
   findOwner: boolean
   headless: boolean
   delayMinMs: number
   delayMaxMs: number
+  /** Divide each location into a grid of map viewports to break Google's ~120/search cap. */
+  segment: boolean
+  /** Width/height of each grid tile in km. Smaller = more tiles = deeper coverage. */
+  tileKm: number
+  /** Hard ceiling on tiles per location, so a large area cannot flood the queue. */
+  maxTiles: number
 }
 
 export interface ResultQuery {
@@ -62,8 +74,34 @@ export interface ResultQuery {
 export type TaskStatus = 'queued' | 'running' | 'done' | 'error' | 'blocked'
 
 export type JobEvent =
-  | { type: 'task-update'; taskId: string; status: TaskStatus; count?: number; error?: string }
+  | { type: 'task-update'; taskId: string; status: TaskStatus; count?: number; error?: string; label?: string }
   | { type: 'row'; business: Business }
-  | { type: 'count'; total: number }
+  | { type: 'count'; total: number; duplicates?: number }
   | { type: 'progress'; done: number; total: number }
   | { type: 'job-done' }
+
+/** A spreadsheet the service account can see (i.e. one shared with it). */
+export interface SpreadsheetRef {
+  id: string
+  name: string
+}
+
+/** A tab within a spreadsheet. */
+export interface TabRef {
+  sheetId: number
+  title: string
+  rowCount: number
+}
+
+/** Outcome of a Sheets export. `total` is rows considered, not rows written. */
+export interface ExportResult {
+  appended: number
+  skipped: number
+  total: number
+}
+
+/** Error body returned by the /api/sheets/* routes. */
+export interface SheetsErrorBody {
+  error: string
+  shareWith?: string
+}

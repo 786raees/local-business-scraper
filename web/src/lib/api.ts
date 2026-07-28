@@ -1,4 +1,18 @@
-import type { Business, JobSettings, LocationSpec, ResultQuery } from './types'
+import type {
+  Business, JobSettings, LocationSpec, ResultQuery,
+  SpreadsheetRef, TabRef, ExportResult, SheetsErrorBody,
+} from './types'
+
+/** Throws an Error carrying the parsed body so callers can show `shareWith`. */
+async function jsonOrThrow<T>(r: Response): Promise<T> {
+  const body = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    const err = new Error((body as SheetsErrorBody).error ?? `HTTP ${r.status}`)
+    Object.assign(err, { status: r.status, shareWith: (body as SheetsErrorBody).shareWith })
+    throw err
+  }
+  return body as T
+}
 
 async function j<T>(url: string): Promise<T> {
   const r = await fetch(url); if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json()
@@ -33,4 +47,14 @@ export const api = {
   clearResults: () => fetch('/api/results/clear', { method: 'POST' }),
   // Streamed straight from the DB on the server — no need to hold rows in the browser.
   exportCsvUrl: () => '/api/export/csv',
+  getSpreadsheets: async () =>
+    jsonOrThrow<SpreadsheetRef[]>(await fetch('/api/sheets/spreadsheets')),
+  getTabs: async (id: string) =>
+    jsonOrThrow<TabRef[]>(await fetch(`/api/sheets/${encodeURIComponent(id)}/tabs`)),
+  exportToSheet: async (payload: { spreadsheetId: string; sheetTitle: string; createNew?: boolean }) =>
+    jsonOrThrow<ExportResult>(await fetch('/api/export/sheets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })),
 }
