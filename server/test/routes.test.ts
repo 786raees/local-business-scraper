@@ -49,6 +49,24 @@ describe('routes', () => {
     expect(res.body.rows[0].name).toBe('Acme')
   })
 
+  it('GET /api/results passes a valid lineType through to the store query', async () => {
+    const deps = makeDeps()
+    const seen: unknown[] = []
+    deps.results.page = ((offset: number, limit: number, q: unknown) => {
+      seen.push(q)
+      return []
+    }) as typeof deps.results.page
+    deps.results.count = ((q: unknown) => { seen.push(q); return 0 }) as typeof deps.results.count
+
+    await request(createApp(deps as any)).get('/api/results?lineType=mobile')
+    expect(seen[0]).toMatchObject({ lineType: 'mobile' })
+
+    // Unrecognized values mean "no filter", like the other params.
+    seen.length = 0
+    await request(createApp(deps as any)).get('/api/results?lineType=carrier-pigeon')
+    expect((seen[0] as { lineType?: string }).lineType).toBeUndefined()
+  })
+
   it('POST /api/results/clear invokes clear', async () => {
     const deps = makeDeps()
     const res = await request(createApp(deps as any)).post('/api/results/clear')
@@ -61,8 +79,20 @@ describe('routes', () => {
     expect(res.status).toBe(200)
     expect(res.headers['content-type']).toContain('text/csv')
     expect(res.text.split('\n')[0]).toContain('name,ownerName')
+    expect(res.text.split('\n')[0]).toContain('lineType,lineCarrier')
     expect(res.text).toContain('Acme')
     expect(res.text).toContain('Beta')
+  })
+
+  it('GET /api/export/csv forwards the filter query to the stream', async () => {
+    const deps = makeDeps()
+    const seen: unknown[] = []
+    deps.results.iterate = function* (_batch: number, q?: unknown) {
+      seen.push(q)
+      yield []
+    } as typeof deps.results.iterate
+    await request(createApp(deps as any)).get('/api/export/csv?lineType=mobile&hasEmail=1')
+    expect(seen[0]).toMatchObject({ lineType: 'mobile', hasEmail: true })
   })
 })
 

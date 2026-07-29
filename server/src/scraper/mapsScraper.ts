@@ -1,5 +1,6 @@
 import { chromium, Browser, BrowserContext, Page } from 'playwright'
 import { Business, JobSettings, emptyBusiness } from '../types.js'
+import { classifyPhone } from '../phone/lineType.js'
 import { SELECTORS } from './selectors.js'
 import { parseRating, parsePriceLevel, placeIdFromUrl, cleanText } from './listingParser.js'
 import { buildSearchUrl, jitter } from './searchUrl.js'
@@ -73,6 +74,10 @@ async function scrapeDetail(page: Page, url: string, keyword: string, location: 
     const parsed = parseRating(labels.join(' '))
     b.rating = parsed.rating; b.reviewCount = parsed.reviewCount
   } catch { /* ignore */ }
+  // Line type is classified here, at row finalize — never in the store, which
+  // stays a dumb persistence layer. A phoneless row gets 'unknown' explicitly.
+  const line = classifyPhone(b.phone)
+  b.lineType = line.lineType; b.lineCarrier = line.lineCarrier
   return b
 }
 

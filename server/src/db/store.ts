@@ -15,6 +15,7 @@ const COLUMNS: (keyof Business)[] = [
   'category', 'hours', 'email', 'mapsUrl', 'keyword', 'location',
   'facebook', 'instagram', 'twitter', 'linkedin', 'youtube', 'tiktok', 'yelp', 'yellowpages',
   'ownerName', 'ownerTitle', 'ownerSource',
+  'lineType', 'lineCarrier',
 ]
 
 // Columns merged numerically rather than as text when a duplicate place is re-seen.
@@ -23,6 +24,7 @@ const NUMERIC = new Set<string>(['rating', 'reviewCount'])
 // Columns the client is allowed to sort by (prevents SQL injection via sortBy).
 const SORTABLE = new Set<string>([
   'name', 'rating', 'reviewCount', 'category', 'address', 'phone', 'email', 'location', 'ownerName',
+  'lineType',
 ])
 
 /**
@@ -49,7 +51,8 @@ export class ResultsStore {
         keyword TEXT, location TEXT,
         facebook TEXT, instagram TEXT, twitter TEXT, linkedin TEXT,
         youtube TEXT, tiktok TEXT, yelp TEXT, yellowpages TEXT,
-        ownerName TEXT, ownerTitle TEXT, ownerSource TEXT
+        ownerName TEXT, ownerTitle TEXT, ownerSource TEXT,
+        lineType TEXT, lineCarrier TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_results_name ON results(name);
     `)
@@ -60,6 +63,7 @@ export class ResultsStore {
     const added = [
       'facebook', 'instagram', 'twitter', 'linkedin', 'youtube', 'tiktok', 'yelp', 'yellowpages',
       'ownerName', 'ownerTitle', 'ownerSource', 'placeId',
+      'lineType', 'lineCarrier',
     ]
     for (const col of added) {
       if (!existing.has(col)) this.db.exec(`ALTER TABLE results ADD COLUMN ${col} TEXT`)
@@ -134,6 +138,16 @@ export class ResultsStore {
     if (q.hasEmail) clauses.push("email <> ''")
     if (q.hasWebsite) clauses.push("website <> ''")
     if (q.hasPhone) clauses.push("phone <> ''")
+    if (q.lineType?.trim()) {
+      // 'unknown' also matches blank/NULL so rows that predate the feature (or
+      // haven't been backfilled) stay reachable through the filter.
+      if (q.lineType === 'unknown') {
+        clauses.push("(lineType = 'unknown' OR lineType = '' OR lineType IS NULL)")
+      } else {
+        clauses.push('lineType = ?')
+        param.push(q.lineType.trim())
+      }
+    }
     return { sql: clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '', param }
   }
 
@@ -168,13 +182,18 @@ export class ResultsStore {
     return rows.map((r) => r.placeId)
   }
 
-  /** Stream every row in id order for CSV export, in batches to bound memory. */
-  *iterateAll(batch = 1000): Generator<Business[]> {
+  /**
+   * Stream rows in id order for CSV export, in batches to bound memory.
+   * Accepts the same filter as the paginated reads so an export matches what
+   * the user sees in the table.
+   */
+  *iterateAll(batch = 1000, q: ResultQuery = {}): Generator<Business[]> {
+    const { sql, param } = this.whereClause(q)
     let offset = 0
     for (;;) {
       const rows = this.db
-        .prepare('SELECT * FROM results ORDER BY id ASC LIMIT ? OFFSET ?')
-        .all(batch, offset) as Record<string, unknown>[]
+        .prepare(`SELECT * FROM results${sql} ORDER BY id ASC LIMIT ? OFFSET ?`)
+        .all(...param, batch, offset) as Record<string, unknown>[]
       if (!rows.length) break
       yield rows.map(toBusiness)
       offset += rows.length
@@ -194,5 +213,6 @@ function toBusiness(r: any): Business {
     linkedin: r.linkedin ?? '', youtube: r.youtube ?? '', tiktok: r.tiktok ?? '',
     yelp: r.yelp ?? '', yellowpages: r.yellowpages ?? '',
     ownerName: r.ownerName ?? '', ownerTitle: r.ownerTitle ?? '', ownerSource: r.ownerSource ?? '',
+    lineType: r.lineType ?? '', lineCarrier: r.lineCarrier ?? '',
   }
 }

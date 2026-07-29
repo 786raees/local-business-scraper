@@ -27,6 +27,7 @@ function queryString(q: ResultQuery): string {
   if (q.hasEmail) p.set('hasEmail', '1')
   if (q.hasWebsite) p.set('hasWebsite', '1')
   if (q.hasPhone) p.set('hasPhone', '1')
+  if (q.lineType) p.set('lineType', q.lineType)
   if (q.sortBy) { p.set('sortBy', q.sortBy); p.set('sortDir', q.sortDir ?? 'asc') }
   return p.toString()
 }
@@ -49,7 +50,11 @@ export const api = {
   stopJob: () => fetch('/api/job/stop', { method: 'POST' }),
   clearResults: () => fetch('/api/results/clear', { method: 'POST' }),
   // Streamed straight from the DB on the server — no need to hold rows in the browser.
-  exportCsvUrl: () => '/api/export/csv',
+  // Pass the current table query so the file matches what the user is looking at.
+  exportCsvUrl: (query: ResultQuery = {}) => {
+    const qs = queryString(query)
+    return qs ? `/api/export/csv?${qs}` : '/api/export/csv'
+  },
   getSpreadsheets: async () =>
     jsonOrThrow<SpreadsheetRef[]>(await fetch('/api/sheets/spreadsheets')),
   getTabs: async (id: string) =>

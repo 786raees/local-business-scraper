@@ -81,7 +81,7 @@ Data flows in one direction: **job request → queue → scraper → SQLite → 
 - **Google Sheets export** (`server/src/sheets/`): pushes results into a chosen tab of a
   spreadsheet **shared with the service account** (Drive only lists those). Auth is a self-signed
   JWT (`auth.ts`) on `node:crypto` — no SDK, no new dependency. **`sheetTemplate.ts` is the single
-  source of truth for sheet look and feel** (the Sheets analogue of `selectors.ts`): the 33 headers,
+  source of truth for sheet look and feel** (the Sheets analogue of `selectors.ts`): the 35 headers,
   the five outreach channel vocabularies, colours, dropdowns and conditional formats. Rules that
   fall out, each learned by breaking something:
   1. Columns are matched to `Business` fields **by header name, never by position**, so a tab's CRM
@@ -107,6 +107,17 @@ Data flows in one direction: **job request → queue → scraper → SQLite → 
   6. `Stage` (where the deal is) and the per-channel statuses are **orthogonal**. The dashboard's
      contact rate counts a non-empty `Outreach`, not `Status LIKE "Called*"`, which would describe
      only one of five channels.
+
+- **Phone line type** (`server/src/phone/`): every scraped phone classifies offline to
+  `mobile`/`landline`/`voip`/`unknown` + carrier from the committed NPA-NXX snapshot
+  (`server/data/npanxx.json.gz`, ~198k prefixes; rebuilt by `npm run linetype:build` from NANPA +
+  localcallingguide, whose `company-type` field flags wireless). **`lineType.ts` is the single
+  source of truth for classification rules** incl. the VoIP carrier-name allowlist; the snapshot
+  loads lazily and its absence degrades to `unknown` — never blocks scraping. Classification runs
+  at row-finalize in `mapsScraper.ts`, never in the store. Non-NANP numbers are `unknown`, never
+  guessed. The data is the prefix's *original* carrier assignment — ported numbers may differ
+  (say so anywhere the type surfaces). `npm run linetype:backfill` classifies pre-feature rows
+  (self-migrating, idempotent).
 
 - **Geo** (`server/src/geo/`): `geoData.ts` uses `country-state-city` — but that package maps cities
   onto only a handful of subdivisions for most non-US countries (GB: 3871 cities across 4 of its 247

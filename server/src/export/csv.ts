@@ -5,6 +5,7 @@ export const ALL_COLUMNS: (keyof Business)[] = [
   'rating', 'reviewCount', 'priceLevel', 'category', 'hours',
   'facebook', 'instagram', 'twitter', 'linkedin', 'youtube', 'tiktok', 'yelp', 'yellowpages',
   'ownerSource', 'mapsUrl', 'keyword', 'location',
+  'lineType', 'lineCarrier',
 ]
 
 function cell(value: unknown): string {

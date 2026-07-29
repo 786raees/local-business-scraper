@@ -19,9 +19,9 @@ describe('template headers', () => {
     }
   })
 
-  it('is 33 columns wide: name + 9 CRM + the other 23 Atlas fields', () => {
+  it('is 35 columns wide: name + 9 CRM + the other 25 Atlas fields', () => {
     expect(TEMPLATE_HEADERS).toHaveLength(ALL_COLUMNS.length + CRM_HEADERS.length)
-    expect(TEMPLATE_HEADERS).toHaveLength(33)
+    expect(TEMPLATE_HEADERS).toHaveLength(35)
   })
 
   it('never uses a channel name that collides with an Atlas URL field', () => {

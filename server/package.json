@@ -7,7 +7,9 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "linetype:build": "tsx scripts/build-linetype-db.ts",
+    "linetype:backfill": "tsx scripts/backfill-linetype.ts"
   },
   "dependencies": {
     "compromise": "^14.15.1",

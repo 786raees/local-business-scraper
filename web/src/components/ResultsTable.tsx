@@ -7,7 +7,7 @@ import type { Business, ResultQuery } from '../lib/types'
 import { SOCIAL_FIELDS } from '../lib/types'
 
 const ROW_H = 40
-const GRID = '36px minmax(150px,1.3fr) minmax(120px,1fr) minmax(95px,0.8fr) minmax(160px,1.4fr) 130px 60px minmax(150px,1.1fr) minmax(140px,1fr)'
+const GRID = '36px minmax(150px,1.3fr) minmax(120px,1fr) minmax(95px,0.8fr) minmax(160px,1.4fr) 130px 90px 60px minmax(150px,1.1fr) minmax(140px,1fr)'
 
 type Col = { key: keyof Business; label: string; sortable: boolean }
 const COLS: Col[] = [
@@ -16,9 +16,16 @@ const COLS: Col[] = [
   { key: 'category', label: 'Category', sortable: true },
   { key: 'address', label: 'Address', sortable: true },
   { key: 'phone', label: 'Phone', sortable: true },
+  { key: 'lineType', label: 'Line', sortable: true },
   { key: 'rating', label: 'Rating', sortable: true },
   { key: 'email', label: 'Email', sortable: true },
   { key: 'facebook', label: 'Socials', sortable: false },
+]
+
+const LINE_TYPES = [
+  { label: 'Line: All', value: '' }, { label: 'Mobile', value: 'mobile' },
+  { label: 'Landline', value: 'landline' }, { label: 'VoIP', value: 'voip' },
+  { label: 'Unknown', value: 'unknown' },
 ]
 
 const RATINGS = [
@@ -36,7 +43,7 @@ export function ResultsTable() {
 
   const [text, setText] = useState({ q: '', category: '' })
   const [debText, setDebText] = useState(text)
-  const [flags, setFlags] = useState({ minRating: 0, minReviews: 0, hasEmail: false, hasWebsite: false, hasPhone: false })
+  const [flags, setFlags] = useState({ minRating: 0, minReviews: 0, hasEmail: false, hasWebsite: false, hasPhone: false, lineType: '' })
   const [sort, setSort] = useState<{ by?: string; dir: 'asc' | 'desc' }>({ dir: 'asc' })
 
   useEffect(() => {
@@ -52,11 +59,16 @@ export function ResultsTable() {
     hasEmail: flags.hasEmail || undefined,
     hasWebsite: flags.hasWebsite || undefined,
     hasPhone: flags.hasPhone || undefined,
+    lineType: flags.lineType || undefined,
     sortBy: sort.by,
     sortDir: sort.dir,
   }), [debText, flags, sort])
 
   const { total, getRow } = useResults(query, liveTotal)
+
+  // Publish the live query so the CSV export link matches the visible view.
+  const setResultQuery = useStore((s) => s.setResultQuery)
+  useEffect(() => { setResultQuery(query) }, [query, setResultQuery])
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const virtualizer = useVirtualizer({
@@ -94,10 +106,10 @@ export function ResultsTable() {
   }
 
   const filtersActive = !!(debText.q || debText.category || flags.minRating || flags.minReviews
-    || flags.hasEmail || flags.hasWebsite || flags.hasPhone)
+    || flags.hasEmail || flags.hasWebsite || flags.hasPhone || flags.lineType)
   const clearFilters = () => {
     setText({ q: '', category: '' }); setDebText({ q: '', category: '' })
-    setFlags({ minRating: 0, minReviews: 0, hasEmail: false, hasWebsite: false, hasPhone: false })
+    setFlags({ minRating: 0, minReviews: 0, hasEmail: false, hasWebsite: false, hasPhone: false, lineType: '' })
     setSort({ dir: 'asc' })
   }
 
@@ -119,6 +131,11 @@ export function ResultsTable() {
         <FilterChip on={flags.hasEmail} onClick={() => setFlags((f) => ({ ...f, hasEmail: !f.hasEmail }))}>Has email</FilterChip>
         <FilterChip on={flags.hasWebsite} onClick={() => setFlags((f) => ({ ...f, hasWebsite: !f.hasWebsite }))}>Has website</FilterChip>
         <FilterChip on={flags.hasPhone} onClick={() => setFlags((f) => ({ ...f, hasPhone: !f.hasPhone }))}>Has phone</FilterChip>
+        <select value={flags.lineType} aria-label="Filter by line type"
+          onChange={(e) => setFlags((f) => ({ ...f, lineType: e.target.value }))}
+          className="field w-32 cursor-pointer">
+          {LINE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+        </select>
         {filtersActive && (
           <button onClick={clearFilters} className="text-xs text-muted underline-offset-2 hover:text-rose hover:underline">
             Clear filters
@@ -217,10 +234,32 @@ function Cells({ row }: { row: Business }) {
       <Cell className="text-muted">{row.category}</Cell>
       <Cell className="text-muted">{row.address}</Cell>
       <Cell className="font-mono text-xs">{row.phone}</Cell>
+      <Cell><LineChip row={row} /></Cell>
       <Cell className="font-mono">{row.rating != null ? <span className="text-amber">{row.rating.toFixed(1)}★</span> : <span className="text-muted">—</span>}</Cell>
       <Cell className="font-mono text-xs">{row.email || <span className="text-muted">—</span>}</Cell>
       <Cell><Socials row={row} /></Cell>
     </>
+  )
+}
+
+/** Line-type chip: text label always, colour as reinforcement (DESIGN §1/§4). */
+const LINE_STYLE: Record<string, { label: string; cls: string }> = {
+  mobile: { label: 'Mobile', cls: 'border-teal/50 bg-teal/10 text-teal' },
+  landline: { label: 'Landline', cls: 'border-line bg-ink-700 text-muted' },
+  voip: { label: 'VoIP', cls: 'border-amber/50 bg-amber/10 text-amber' },
+}
+
+function LineChip({ row }: { row: Business }) {
+  const style = LINE_STYLE[row.lineType]
+  if (!style) return <span className="text-muted">—</span>
+  const caveat = "based on the number's original carrier assignment — ported numbers may differ"
+  return (
+    <span
+      className={`rounded border px-1.5 py-0.5 font-mono text-[10px] ${style.cls}`}
+      title={row.lineCarrier ? `${row.lineCarrier} — ${caveat}` : caveat}
+    >
+      {style.label}
+    </span>
   )
 }
 

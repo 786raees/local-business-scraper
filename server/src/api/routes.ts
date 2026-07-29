@@ -6,6 +6,8 @@ import {
   SpreadsheetRef, TabRef, ExportTarget, SplitExportResult, normalizeSettings,
 } from '../types.js'
 
+const LINE_TYPES = new Set(['mobile', 'landline', 'voip', 'unknown'])
+
 function parseQuery(req: Request): ResultQuery {
   const q = req.query
   const num = (v: unknown) => (v != null && v !== '' ? Number(v) : undefined)
@@ -18,6 +20,8 @@ function parseQuery(req: Request): ResultQuery {
     hasEmail: bool(q.hasEmail),
     hasWebsite: bool(q.hasWebsite),
     hasPhone: bool(q.hasPhone),
+    // Unrecognized values simply mean "no filter", like the other params.
+    lineType: LINE_TYPES.has(String(q.lineType)) ? String(q.lineType) : undefined,
     sortBy: q.sortBy ? String(q.sortBy) : undefined,
     sortDir: q.sortDir === 'desc' ? 'desc' : 'asc',
   }
@@ -34,7 +38,7 @@ export interface RouteDeps {
     page: (offset: number, limit: number, query: ResultQuery) => Business[]
     count: (query: ResultQuery) => number
     ids: (offset: number, limit: number, query: ResultQuery) => string[]
-    iterate: (batch: number) => Generator<Business[]>
+    iterate: (batch: number, query?: ResultQuery) => Generator<Business[]>
     clear: () => void
   }
   startJob: (keywords: string[], locations: LocationSpec[], settings: JobSettings) => void
@@ -92,12 +96,14 @@ export function createApp(deps: RouteDeps): Express {
   // Wipe all stored results (e.g. after exporting CSV).
   app.post('/api/results/clear', (_req, res) => { deps.results.clear(); res.json({ ok: true }) })
 
-  // Stream the full result set from disk so export scales to millions of rows.
-  app.get('/api/export/csv', (_req, res) => {
+  // Stream the (optionally filtered) result set from disk so export scales to
+  // millions of rows. The same query params as /api/results apply, so "export
+  // what I'm looking at" is one link.
+  app.get('/api/export/csv', (req, res) => {
     res.setHeader('Content-Type', 'text/csv')
     res.setHeader('Content-Disposition', 'attachment; filename="results.csv"')
     res.write(csvHeaderLine() + '\n')
-    for (const batch of deps.results.iterate(1000)) res.write(csvRows(batch))
+    for (const batch of deps.results.iterate(1000, parseQuery(req))) res.write(csvRows(batch))
     res.end()
   })
 

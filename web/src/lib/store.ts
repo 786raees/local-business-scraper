@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { JobSettings, LocationSpec, JobEvent, TaskStatus } from './types'
+import type { JobSettings, LocationSpec, JobEvent, TaskStatus, ResultQuery } from './types'
 
 interface QueueItem { id: string; status: TaskStatus; count: number; error?: string; label?: string }
 
@@ -16,6 +16,8 @@ interface State {
   selected: Set<string>
   /** Row index of the last checkbox click — the anchor for shift-range selection. */
   lastClickedIndex: number | null
+  /** The results table's current filter/sort, published so CSV export matches the view. */
+  resultQuery: ResultQuery
   addKeyword: (k: string) => void
   removeKeyword: (k: string) => void
   addLocation: (l: LocationSpec) => void
@@ -27,6 +29,7 @@ interface State {
   toggleOne: (placeId: string, index: number) => void
   setSelected: (ids: string[], on: boolean, anchorIndex?: number) => void
   clearSelection: () => void
+  setResultQuery: (q: ResultQuery) => void
 }
 
 export const useStore = create<State>((set) => ({
@@ -62,6 +65,8 @@ export const useStore = create<State>((set) => ({
     return { selected, ...(anchorIndex !== undefined ? { lastClickedIndex: anchorIndex } : {}) }
   }),
   clearSelection: () => set({ selected: new Set<string>(), lastClickedIndex: null }),
+  resultQuery: {},
+  setResultQuery: (q) => set({ resultQuery: q }),
   reset: () => set({
     total: 0, duplicates: 0, queue: [], progress: { done: 0, total: 0 },
     selected: new Set<string>(), lastClickedIndex: null,

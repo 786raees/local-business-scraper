@@ -63,7 +63,7 @@ const app = createApp({
     page: (offset, limit, filter) => store.queryPage(offset, limit, filter),
     count: (filter) => store.count(filter),
     ids: (offset, limit, filter) => store.queryIds(offset, limit, filter),
-    iterate: (batch) => store.iterateAll(batch),
+    iterate: (batch, filter) => store.iterateAll(batch, filter),
     clear: () => { store.reset(); inserted = 0; duplicates = 0 },
   },
   startJob: (keywords: string[], locations: LocationSpec[], settings: JobSettings) => {

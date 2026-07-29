@@ -39,6 +39,13 @@ export interface Business {
   ownerName: string
   ownerTitle: string
   ownerSource: string
+  /**
+   * 'mobile' | 'landline' | 'voip' | 'unknown' — derived offline from the phone's
+   * NPA-NXX prefix (original carrier assignment; ported numbers may differ).
+   * '' on rows that predate the feature and haven't been backfilled.
+   */
+  lineType: string
+  lineCarrier: string
 }
 
 export interface JobSettings {
@@ -128,6 +135,8 @@ export interface ResultQuery {
   hasEmail?: boolean
   hasWebsite?: boolean
   hasPhone?: boolean
+  /** 'mobile' | 'landline' | 'voip' | 'unknown' ('unknown' also matches unbackfilled ''). */
+  lineType?: string
   sortBy?: string
   sortDir?: 'asc' | 'desc'
 }
@@ -149,6 +158,7 @@ export function emptyBusiness(keyword: string, location: string): Business {
     facebook: '', instagram: '', twitter: '', linkedin: '', youtube: '', tiktok: '',
     yelp: '', yellowpages: '',
     ownerName: '', ownerTitle: '', ownerSource: '',
+    lineType: '', lineCarrier: '',
   }
 }
 

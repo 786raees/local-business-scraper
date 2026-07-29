@@ -15,6 +15,7 @@ export function ExportDialog({ open, onClose }: Props) {
   const selectedIds = useStore((s) => s.selected)
   const clearSelection = useStore((s) => s.clearSelection)
   const total = useStore((s) => s.total)
+  const resultQuery = useStore((s) => s.resultQuery)
 
   const [step, setStep] = useState<Step>('destination')
   const [scope, setScope] = useState<'all' | 'selected'>('all')
@@ -133,13 +134,15 @@ export function ExportDialog({ open, onClose }: Props) {
               </div>
             )}
             <a
-              href={api.exportCsvUrl()}
+              href={api.exportCsvUrl(resultQuery)}
               download
               onClick={onClose}
               className="block rounded-md border border-line px-3 py-2.5 text-sm text-parchment transition hover:border-teal hover:text-teal"
             >
               Download CSV
-              <span className="block text-xs text-muted">Always exports all rows — streamed from disk</span>
+              <span className="block text-xs text-muted">
+                Exports the current filtered view — streamed from disk
+              </span>
             </a>
             <button
               onClick={chooseSheets}
