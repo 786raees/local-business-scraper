@@ -1,0 +1,96 @@
+/*
+ * Single source of truth for the visual language.
+ * doc/CHROME_EXTENSION_DESIGN.md §2–§4. Components must reference tokens,
+ * never raw hex — a raw hex in a component file fails review (DESIGN §9).
+ */
+
+:root {
+  /* §2.1 Surfaces & chrome (derived from the Atlas sheet navy) */
+  --bg-app: #0b0f21;
+  --bg-surface: #0f142d;
+  --bg-raised: #161d3d;
+  --border: #2a3358;
+  --border-focus: #4c6fff;
+
+  /* §2.2 Text */
+  --text-primary: #eef1fa;
+  --text-secondary: #a8b0cf;
+  --text-muted: #6b7394;
+  --text-inverse: #0f142d;
+
+  /* §2.3 Accent & call states */
+  --accent: #4c6fff;
+  --accent-hover: #6584ff;
+  --state-dialing: #f2cc0c;
+  --state-ringing: #ffbf00;
+  --state-incall: #21c25e;
+  --state-error: #d83333;
+
+  /* §2.4 Outcome buckets — mirror OUTCOME_COLOURS in sheetTemplate.ts */
+  --outcome-positive: #218c21;
+  --outcome-positive-fg: #ffffff;
+  --outcome-pending: #ffbf00;
+  --outcome-pending-fg: #ffffff;
+  --outcome-negative: #d83333;
+  --outcome-negative-fg: #ffffff;
+  --outcome-neutral: #b2b2b2;
+  --outcome-neutral-fg: #000000;
+
+  /* §2.5 Stage badge colours — mirror STAGE_COLOURS */
+  --stage-new: #e5e5e5;            --stage-new-fg: #000000;
+  --stage-contacted: #b2b2b2;      --stage-contacted-fg: #000000;
+  --stage-interested: #ffbf00;     --stage-interested-fg: #ffffff;
+  --stage-demo-booked: #4c00cc;    --stage-demo-booked-fg: #ffffff;
+  --stage-trial-active: #0066cc;   --stage-trial-active-fg: #ffffff;
+  --stage-closed-won: #218c21;     --stage-closed-won-fg: #ffffff;
+  --stage-closed-lost: #d83333;    --stage-closed-lost-fg: #ffffff;
+  --stage-not-interested: #e57f19; --stage-not-interested-fg: #ffffff;
+  --stage-dnc: #7f1919;            --stage-dnc-fg: #ffffff;
+
+  /* §3 Typography */
+  --font-sans: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --type-display: 700 20px/28px var(--font-sans);
+  --type-title: 600 16px/24px var(--font-sans);
+  --type-body: 400 13px/20px var(--font-sans);
+  --type-body-strong: 600 13px/20px var(--font-sans);
+  --type-caption: 500 11px/16px var(--font-sans);
+  --type-timer: 600 28px/32px var(--font-sans);
+  --caption-tracking: 0.06em;
+
+  /* §4 Spacing (4px base), shape, elevation */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-full: 9999px;
+  --shadow-overlay: 0 8px 24px rgb(0 0 0 / 0.5);
+}
+
+/* Minimal base — dark theme only in v1 (DESIGN §1). */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-app);
+  color: var(--text-primary);
+  font: var(--type-body);
+}
+
+/* Numbers that change in place never jitter (DESIGN §3). */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
