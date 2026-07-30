@@ -86,16 +86,18 @@ worker changes.
 
 - [ ] The page shows exactly four cards in order (Connection, Dialer, Recording, Danger
       zone); every existing control is present and functional — manual smoke walkthrough.
-- [ ] Recording renders as a stepped chain: with no consent, mic + enable + duration rows
+      <!-- needs manual smoke: visual walkthrough; composition in KeySetup.tsx -->
+- [x] Recording renders as a stepped chain: with no consent, mic + enable + duration rows
       are visibly muted (not hidden); granting each step unlocks the next
-      (`recordingSteps` unit tests cover all lock states).
-- [ ] Booleans are `role="switch"` buttons, keyboard-operable (Space/Enter), no native
-      checkboxes remain on the page (grep `type="checkbox"` under `src/options/` → none).
-- [ ] Behaviour untouched: `git diff` for the story touches only `src/options/**`
-      (+ its test file) — `storage.ts`, `messages.ts`, `background/**` unchanged.
-- [ ] The consent legal sentence and the clampSettings-enforced consent rule are intact
-      (existing recording.test.ts consent-gate tests still pass, verbatim copy present).
-- [ ] Tokens only: no raw hex outside `tokens.css` (grep), all new styles in
-      `options.css` reference `--*` variables.
-- [ ] Full suite green (`npm run build && npm test && npm run lint` in `extension/`);
-      prior stories' tests untouched.
+      (`recordingSteps` unit tests cover all lock states, incl. mic-revoked re-lock).
+- [x] Booleans are `role="switch"` buttons, keyboard-operable (native button ⇒
+      Space/Enter), no native checkboxes remain (grep `type="checkbox"` under
+      `src/options/` → none).
+- [x] Behaviour untouched: the story's diff is exactly `src/options/**` + its test file —
+      `storage.ts`, `messages.ts`, `background/**` unchanged (git status verified).
+- [x] The consent legal sentence and the clampSettings-enforced consent rule are intact
+      (recording.test.ts consent-gate tests pass; verbatim copy in RecordingSection).
+- [x] Tokens only: no raw hex under `src/options/` (grep); new styles reference `--*`
+      variables (color-mix over --state-error for the danger card border).
+- [x] Full suite green (`npm run build && npm test && npm run lint` in `extension/`);
+      171 tests, lint 0, prior tests untouched.

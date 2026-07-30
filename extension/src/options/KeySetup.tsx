@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { exchangeToken, parseServiceAccountKey } from '../sheets/auth'
 import type { ServiceAccountKey } from '../sheets/auth'
-import { clearSessionToken, keyStore } from '../shared/storage'
-import { SettingsSection } from './SettingsSection'
+import { clearSessionToken, keyStore, settingsStore } from '../shared/storage'
+import type { Settings } from '../shared/storage'
+import { DangerSection } from './DangerSection'
+import { DialerSection } from './DialerSection'
+import { OptionsCard } from './OptionsCard'
+import { RecordingSection } from './RecordingSection'
 
 type Status =
   | { state: 'empty' }
@@ -11,11 +15,15 @@ type Status =
   | { state: 'error'; message: string }
 
 /**
- * S0 — key setup (UX §2/S0). Validation happens on paste/drop, no Save button:
- * parse → require client_email/private_key → live token exchange.
+ * S0 — key setup + the settings page composer (story 17): four cards —
+ * Connection · Dialer · Recording · Danger zone. Key validation happens on
+ * paste/drop, no Save button: parse → require client_email/private_key →
+ * live token exchange. Settings state lives here so Reset refreshes every
+ * section at once.
  */
 export function KeySetup() {
   const [status, setStatus] = useState<Status>({ state: 'empty' })
+  const [settings, setSettings] = useState<Settings | null>(null)
   const [dragging, setDragging] = useState(false)
   const [copied, setCopied] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
@@ -24,7 +32,12 @@ export function KeySetup() {
     void keyStore.get().then((key) => {
       if (key) setStatus({ state: 'connected', email: key.client_email })
     })
+    void settingsStore.get().then(setSettings)
   }, [])
+
+  function save(patch: Partial<Settings>) {
+    void settingsStore.set(patch).then(setSettings)
+  }
 
   async function validate(json: string) {
     setStatus({ state: 'validating' })
@@ -65,29 +78,40 @@ export function KeySetup() {
   if (status.state === 'connected') {
     return (
       <div className="setup">
-        <h1>Connect your Google account</h1>
-        <div className="card">
+        <h1>Settings</h1>
+
+        <OptionsCard
+          title="Connection"
+          description="Quick Dial reads your lead sheet and writes call outcomes back through this service account."
+        >
           <div className="status-line ok">✓ Connected as {status.email}</div>
-        </div>
-        <div className="card">
-          <div className="hint">Step 2 — share your spreadsheet with this email</div>
-          <button
-            className="chip"
-            onClick={() => void copyEmail(status.email)}
-            title="Copy to clipboard"
-          >
-            {copied ? 'Copied ✓' : `${status.email} ⧉`}
-          </button>
+          <div className="setting-row">
+            <span>Share your spreadsheet with this email (Editor)</span>
+            <button
+              className="chip"
+              onClick={() => void copyEmail(status.email)}
+              title="Copy to clipboard"
+            >
+              {copied ? 'Copied ✓' : `${status.email} ⧉`}
+            </button>
+          </div>
           <a href="https://sheets.google.com" target="_blank" rel="noreferrer">
             Open Google Sheets
           </a>
-        </div>
-        <SettingsSection />
-        <div>
-          <button className="btn danger" onClick={() => void removeKey()}>
-            Remove key
-          </button>
-        </div>
+        </OptionsCard>
+
+        {settings && (
+          <>
+            <DialerSection settings={settings} save={save} />
+            <RecordingSection settings={settings} save={save} />
+          </>
+        )}
+
+        <DangerSection
+          onRemoveKey={() => void removeKey()}
+          onReset={() => void settingsStore.reset().then(setSettings)}
+        />
+
         <p className="footer-note">
           The key stays in this browser profile. Anyone using this profile can read it.
         </p>
