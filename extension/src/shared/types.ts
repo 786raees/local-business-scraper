@@ -51,15 +51,54 @@ export type SessionPhase =
   | 'paused'
   | 'error'
 
-/** Which loaded rows a session will dial (UX S3.5). */
+/** The status axis of the dial criteria (UX S3.5) — the original v1 filter. */
 export type DialFilter = 'all' | 'uncalled' | 'retry'
+
+/** Line-type filter values. 'unknown' explicitly matches blank/absent cells. */
+export type LineTypeFilter = 'mobile' | 'landline' | 'voip' | 'unknown'
+
+export interface NumberFilter {
+  op: 'lt' | 'gte'
+  value: number
+}
+
+/**
+ * Composable dial-list criteria (story 14): AND across axes, OR within a
+ * multi-select axis. Absent/empty optional axes mean "any". Evaluated ONLY by
+ * matchesFilter in background/leads.ts — no component filters on its own.
+ */
+export interface DialCriteria {
+  status: DialFilter
+  lineTypes?: LineTypeFilter[]
+  website?: 'any' | 'has' | 'none'
+  reviewCount?: NumberFilter
+  /** 1.0–5.0. Blank/NaN cells count as blank, never 0 (story 14 decision 5). */
+  rating?: NumberFilter
+  /** Sheet Stage values. */
+  stages?: string[]
+  /** Logged Call Status values. */
+  outcomes?: CallOutcome[]
+}
+
+/** Leads excluded ONLY because a filtered value is blank (story 14 decision 3). */
+export interface BlankExclusions {
+  rating: number
+  reviewCount: number
+  lineType: number
+}
 
 export interface SessionSnapshot {
   phase: SessionPhase
   spreadsheet?: { id: string; name: string }
   tab?: { title: string; rowCount: number }
-  leads: { total: number; skippedNoPhone: number; dialable: number }
-  filter: DialFilter
+  leads: {
+    total: number
+    skippedNoPhone: number
+    dialable: number
+    /** Present when an active blank-sensitive filter excluded leads for blank data. */
+    excludedBlank?: BlankExclusions
+  }
+  criteria: DialCriteria
   /** Index into the dialable list. */
   cursor: number
   currentLead?: Lead
@@ -77,6 +116,14 @@ export interface SessionSnapshot {
   tally?: Partial<Record<CallOutcome, number>>
   /** The just-logged outcome while the between-calls undo window is open. */
   lastOutcome?: CallOutcome
+  /** Story 15: recording state for the panel chip/notice. Absent = disabled. */
+  recording?: 'on' | 'failed'
+  /**
+   * Story 16: the just-ended call's kept recording, for the S5 strip. The
+   * download id deliberately never crosses the wire — the panel asks the
+   * worker to discard, it never touches chrome.downloads itself.
+   */
+  lastRecording?: { file: string; durationMs: number }
   error?: string
 }
 

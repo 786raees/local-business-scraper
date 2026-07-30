@@ -35,6 +35,20 @@ export function notesAppend(existing: string, note: string, dateIso: string): st
 }
 
 /**
+ * Story 15: fold the recording basename into the outcome's note. The filename
+ * rides the EXISTING Notes write (single-cell RAW, undo-covered) — no new
+ * write shape, and no write at all when there's neither note nor recording.
+ */
+export function withRecordingNote(
+  note: string | undefined,
+  recordingFile: string | undefined,
+): string | undefined {
+  if (!recordingFile) return note
+  const tag = `🎙 ${recordingFile}`
+  return note?.trim() ? `${note.trim()}\n${tag}` : tag
+}
+
+/**
  * The stale-row guard: names must match (whitespace-insensitively) or the
  * sheet was re-sorted and every cursor is invalid — a wrong write is worse
  * than a missed one.

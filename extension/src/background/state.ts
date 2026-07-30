@@ -1,7 +1,8 @@
 import type { HeaderMapping } from '../sheets/mapping'
+import { DEFAULT_CRITERIA } from '../shared/criteria'
 import type { Selection } from '../shared/storage'
-import type { CallOutcome, DialFilter, Lead, SessionSnapshot } from '../shared/types'
-import { dialableLeads } from './leads'
+import type { CallOutcome, DialCriteria, Lead, SessionSnapshot } from '../shared/types'
+import { dialableLeads, excludedBlankCounts } from './leads'
 import { initialCore } from './session'
 import type { SessionCore } from './session'
 
@@ -22,24 +23,60 @@ export interface WorkerState extends SessionCore {
   tally?: Partial<Record<CallOutcome, number>>
   /** The just-logged outcome while the undo window is open. */
   lastOutcome?: CallOutcome
+  /** Story 15 (interpreter-owned): recording state for the panel. */
+  recording?: 'on' | 'failed'
+  /** The just-ended call's kept recording, until an outcome consumes it (story 16). */
+  lastRecording?: RecordingRef
+  /** Stashed by the outcome so undo can restore it (story 16 decision 1). */
+  pendingRecording?: RecordingRef
+}
+
+/** A recording this session saved — downloadId is the only deletion handle. */
+export interface RecordingRef {
+  file: string
+  downloadId: number
+  durationMs: number
+}
+
+/**
+ * The outcome consumes the recording (its file rides the note) but stashes the
+ * ref so undo can bring it back — keep/discard is meaningless if undo silently
+ * drops the file reference (story 16 decision 1). Pure for tests.
+ */
+export function consumeRecordingForOutcome(
+  state: Pick<WorkerState, 'lastRecording' | 'pendingRecording'>,
+): string | undefined {
+  const ref = state.lastRecording
+  state.lastRecording = undefined
+  state.pendingRecording = ref
+  return ref?.file
+}
+
+/** Undo reopens S5 with the recording intact (discard still possible there). */
+export function restoreRecordingOnUndo(
+  state: Pick<WorkerState, 'lastRecording' | 'pendingRecording'>,
+): void {
+  state.lastRecording = state.pendingRecording
+  state.pendingRecording = undefined
 }
 
 export function buildSnapshot(
   state: WorkerState | null,
-  filter: DialFilter = 'uncalled',
+  criteria: DialCriteria = DEFAULT_CRITERIA,
 ): SessionSnapshot {
   if (!state) {
     return {
       phase: 'pick-sheet',
       leads: { total: 0, skippedNoPhone: 0, dialable: 0 },
-      filter,
+      criteria,
       cursor: 0,
       callState: 'idle',
       unsyncedOutcomes: 0,
     }
   }
-  const dialable = dialableLeads(state.leads, filter)
+  const dialable = dialableLeads(state.leads, criteria)
   const cursor = Math.min(state.cursor, Math.max(0, dialable.length - 1))
+  const blank = excludedBlankCounts(state.leads, criteria)
   return {
     phase: state.phase,
     spreadsheet: { id: state.selection.spreadsheetId, name: state.selection.spreadsheetName },
@@ -48,8 +85,10 @@ export function buildSnapshot(
       total: state.leads.length,
       skippedNoPhone: state.skippedNoPhone,
       dialable: dialable.length,
+      excludedBlank:
+        blank.rating || blank.reviewCount || blank.lineType ? blank : undefined,
     },
-    filter,
+    criteria,
     cursor,
     currentLead: dialable[cursor],
     callState: state.callState,
@@ -59,6 +98,11 @@ export function buildSnapshot(
     unsyncedOutcomes: 0,
     tally: state.tally,
     lastOutcome: state.lastOutcome,
+    recording: state.recording,
+    // Strips downloadId: the panel never gets a deletion handle (story 16).
+    lastRecording: state.lastRecording
+      ? { file: state.lastRecording.file, durationMs: state.lastRecording.durationMs }
+      : undefined,
     error: state.error,
   }
 }

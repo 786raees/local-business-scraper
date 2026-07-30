@@ -239,6 +239,119 @@
 }
 .filter-select:focus { outline: none; border-color: var(--border-focus); }
 
+/* Composable dial filter (story 14) */
+.filter-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.filter-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 36px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font: var(--type-body);
+  padding: var(--space-1) var(--space-2);
+  text-align: left;
+  cursor: pointer;
+}
+.filter-summary:focus-visible { outline: none; border-color: var(--border-focus); }
+.filter-summary-text { flex: 1; }
+
+.filter-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+}
+
+.crit-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+
+.crit-label {
+  font: var(--type-caption);
+  letter-spacing: var(--caption-tracking);
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  flex: 0 0 64px;
+}
+
+.crit-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font: var(--type-body);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.chip-row { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+.chip-toggle {
+  cursor: pointer;
+  opacity: 0.45;
+}
+.chip-toggle[aria-pressed='true'] { opacity: 1; }
+.chip-toggle:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+
+/* The unknown line kind has no story-13 chip colour — neutral outline. */
+.line-unknown {
+  border-color: var(--border);
+  color: var(--text-secondary);
+}
+
+.crit-checklist { align-items: flex-start; }
+.check-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-height: 148px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.num-input { flex: 0 0 auto; width: 72px; }
+
+/* Kept-recording strip on S5 (story 16) */
+.recording-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+}
+
+/* Recording chip (story 15) — rides the state line while capture runs */
+.rec-chip {
+  margin-left: auto;
+  font: var(--type-caption);
+  letter-spacing: var(--caption-tracking);
+  color: var(--state-ringing);
+  border: 1px solid color-mix(in srgb, var(--state-ringing) 50%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 1px var(--space-2);
+  white-space: nowrap;
+}
+
 /* Sticky session bar (DESIGN §4 footer, §6.8 progress) */
 .session-bar {
   margin-top: auto;

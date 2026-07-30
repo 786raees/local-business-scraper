@@ -1,4 +1,4 @@
-import type { CallOutcome, CallState, DialFilter, SessionSnapshot } from './types'
+import type { CallOutcome, CallState, DialCriteria, SessionSnapshot } from './types'
 
 /**
  * Every message that crosses a surface boundary. Nothing else does.
@@ -13,14 +13,16 @@ export type PanelToBg =
   | { kind: 'session/start'; fromRow?: number }
   | { kind: 'session/stop'; hard: boolean }
   | { kind: 'session/skip' }
-  | { kind: 'session/setFilter'; filter: DialFilter }
+  | { kind: 'session/setCriteria'; criteria: DialCriteria }
   | { kind: 'session/setCursor'; rowIndex: number | null }
   | { kind: 'leads/peek'; rowIndex: number }
   | { kind: 'leads/list' }
+  | { kind: 'leads/vocab' }
   | { kind: 'leads/searchAll'; query: string }
   | { kind: 'call/outcome'; outcome: CallOutcome; note?: string }
   | { kind: 'session/undo' }
   | { kind: 'session/dialNow' }
+  | { kind: 'recording/discard' }
   | { kind: 'queue/list' }
   | { kind: 'queue/retry' }
   | { kind: 'session/reloadLeads' }
@@ -40,7 +42,16 @@ export type ContentToBg =
   | { kind: 'voice/callState'; state: CallState }
   | { kind: 'voice/error'; reason: 'not-logged-in' | 'dialer-not-found' | 'dial-failed' }
 
-export type AnyMessage = PanelToBg | BgToPanel | BgToContent | ContentToBg
+// ── Recording channel (story 15): worker ↔ offscreen capture document ──────
+export type BgToOffscreen =
+  | { kind: 'rec/start'; streamId: string }
+  | { kind: 'rec/stop' }
+
+export type OffscreenReply =
+  | { ok: true; url?: string }
+  | { ok: false; error: 'mic-denied' | 'capture-failed' | 'save-failed' }
+
+export type AnyMessage = PanelToBg | BgToPanel | BgToContent | ContentToBg | BgToOffscreen
 
 /** Request/response envelope for panel→background calls that return data. */
 export type Result<T> =

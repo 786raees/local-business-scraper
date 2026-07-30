@@ -1,5 +1,6 @@
 import type { ServiceAccountKey, CachedToken, TokenStore } from '../sheets/auth'
-import type { DialFilter } from './types'
+import { DEFAULT_CRITERIA, sanitizeCriteria } from './criteria'
+import type { DialCriteria, DialFilter } from './types'
 
 /**
  * Typed accessors over chrome.storage (ARCHITECTURE §8).
@@ -73,14 +74,22 @@ export type { DialFilter }
 export interface Settings {
   interCallDelayMs: number
   ringingTimeoutMs: number
-  dialFilter: DialFilter
+  dialCriteria: DialCriteria
+  /** Story 15: off by default, and inert without the consent acknowledgement. */
+  recordingEnabled: boolean
+  /** ISO timestamp of the user's call-recording-law acknowledgement. */
+  recordingConsentAt?: string
+  /** Story 16: auto-discard recordings shorter than this. 0 = keep everything. */
+  recordingMinSeconds: number
 }
 
 /** Defaults per ARCHITECTURE §8; `uncalled` is the safe default (UX S3.5). */
 export const DEFAULT_SETTINGS: Settings = {
   interCallDelayMs: 3000,
   ringingTimeoutMs: 60000,
-  dialFilter: 'uncalled',
+  dialCriteria: DEFAULT_CRITERIA,
+  recordingEnabled: false,
+  recordingMinSeconds: 5,
 }
 
 const SETTINGS_SLOT = 'settings'
@@ -92,6 +101,7 @@ const SETTINGS_SLOT = 'settings'
 export const SETTINGS_BOUNDS = {
   interCallDelayMs: { min: 1000, max: 30000 },
   ringingTimeoutMs: { min: 30000, max: 120000 },
+  recordingMinSeconds: { min: 0, max: 60 },
 } as const
 
 export function clampSettings(settings: Settings): Settings {
@@ -101,16 +111,34 @@ export function clampSettings(settings: Settings): Settings {
     ...settings,
     interCallDelayMs: clamp(settings.interCallDelayMs, SETTINGS_BOUNDS.interCallDelayMs),
     ringingTimeoutMs: clamp(settings.ringingTimeoutMs, SETTINGS_BOUNDS.ringingTimeoutMs),
+    dialCriteria: sanitizeCriteria(settings.dialCriteria),
+    // Recording cannot be on without the consent acknowledgement (story 15).
+    recordingEnabled: settings.recordingEnabled === true && !!settings.recordingConsentAt,
+    recordingMinSeconds: clamp(
+      Number.isFinite(settings.recordingMinSeconds)
+        ? settings.recordingMinSeconds
+        : DEFAULT_SETTINGS.recordingMinSeconds,
+      SETTINGS_BOUNDS.recordingMinSeconds,
+    ),
   }
+}
+
+/**
+ * Story 14 migration: pre-criteria versions stored `dialFilter: DialFilter`.
+ * A legacy value lifts into `{ status: dialFilter }` so nobody's setting resets.
+ */
+export function normalizeStoredSettings(raw: unknown): Settings {
+  const stored = (raw ?? {}) as Partial<Settings> & { dialFilter?: DialFilter }
+  const dialCriteria =
+    stored.dialCriteria ??
+    (stored.dialFilter ? { status: stored.dialFilter } : DEFAULT_CRITERIA)
+  return clampSettings({ ...DEFAULT_SETTINGS, ...stored, dialCriteria })
 }
 
 export const settingsStore = {
   async get(): Promise<Settings> {
     const items = await chrome.storage.local.get(SETTINGS_SLOT)
-    return clampSettings({
-      ...DEFAULT_SETTINGS,
-      ...(items[SETTINGS_SLOT] as Partial<Settings> | undefined),
-    })
+    return normalizeStoredSettings(items[SETTINGS_SLOT])
   },
   async set(patch: Partial<Settings>): Promise<Settings> {
     const next = clampSettings({ ...(await this.get()), ...patch })

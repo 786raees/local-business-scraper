@@ -59,6 +59,10 @@ export type Effect =
   | 'setDelayTimer'
   | 'clearDelayTimer'
   | 'saveResume'
+  // Story 15: recording brackets the call. Emitted unconditionally; the
+  // interpreter no-ops them when recording is disabled in settings.
+  | 'startRecording'
+  | 'stopRecording'
 
 export interface Transition {
   core: SessionCore
@@ -132,12 +136,15 @@ export function reduce(
         case 'in-call':
           return {
             core: { ...core, phase: 'in-call', callState: 'in-call' },
-            effects: ['clearRingingAlarm'],
+            effects: ['clearRingingAlarm', 'startRecording'],
           }
         case 'ended':
           return {
             core: { ...core, phase: 'awaiting-outcome', callState: 'ended' },
-            effects: ['clearRingingAlarm'],
+            // A call that never connected (ended from dialing) has no recording.
+            effects: core.phase === 'in-call'
+              ? ['clearRingingAlarm', 'stopRecording']
+              : ['clearRingingAlarm'],
           }
         default:
           return same(core)
@@ -222,15 +229,20 @@ export function reduce(
         },
         effects: [
           ...(active ? (['hangUp'] as Effect[]) : []),
+          ...(core.phase === 'in-call' ? (['stopRecording'] as Effect[]) : []),
           'clearRingingAlarm', 'clearDelayTimer', 'saveResume',
         ],
       }
     }
 
     case 'voiceError': {
+      // In-call cleanup: never leave a recorder running past the session.
       return {
         core: { ...core, phase: 'error', callState: 'idle', error: event.reason },
-        effects: ['clearRingingAlarm', 'clearDelayTimer', 'saveResume'],
+        effects: [
+          ...(core.phase === 'in-call' ? (['stopRecording'] as Effect[]) : []),
+          'clearRingingAlarm', 'clearDelayTimer', 'saveResume',
+        ],
       }
     }
   }

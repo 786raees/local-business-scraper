@@ -206,6 +206,50 @@ describe('undo', () => {
   })
 })
 
+describe('recording effects (story 15)', () => {
+  const inCall = () => run(reduce(initialCore(), { type: 'start' }, TOTAL).core, [
+    { type: 'callState', state: 'in-call' },
+  ]).state
+
+  it('starts on the dialing → in-call transition only', () => {
+    const dialing = reduce(initialCore(), { type: 'start' }, TOTAL)
+    expect(dialing.effects).not.toContain('startRecording')
+    const connected = reduce(dialing.core, { type: 'callState', state: 'in-call' }, TOTAL)
+    expect(connected.effects).toEqual(['clearRingingAlarm', 'startRecording'])
+    // ringing does not start a recording
+    expect(reduce(dialing.core, { type: 'callState', state: 'ringing' }, TOTAL).effects)
+      .toEqual([])
+  })
+
+  it('stops when a connected call ends (→ awaiting-outcome)', () => {
+    const t = reduce(inCall(), { type: 'callState', state: 'ended' }, TOTAL)
+    expect(t.core.phase).toBe('awaiting-outcome')
+    expect(t.effects).toEqual(['clearRingingAlarm', 'stopRecording'])
+  })
+
+  it('a call that never connected has nothing to stop', () => {
+    const dialing = reduce(initialCore(), { type: 'start' }, TOTAL).core
+    expect(reduce(dialing, { type: 'callState', state: 'ended' }, TOTAL).effects)
+      .toEqual(['clearRingingAlarm'])
+    expect(reduce(dialing, { type: 'ringingTimeout' }, TOTAL).effects)
+      .toEqual(['hangUp', 'clearRingingAlarm'])
+  })
+
+  it('stopHard mid-conversation stops the recorder; from other phases it does not', () => {
+    expect(reduce(inCall(), { type: 'stopHard' }, TOTAL).effects).toContain('stopRecording')
+    const awaiting = reduce(inCall(), { type: 'callState', state: 'ended' }, TOTAL).core
+    expect(reduce(awaiting, { type: 'stopHard' }, TOTAL).effects).not.toContain('stopRecording')
+  })
+
+  it('voiceError mid-conversation cleans up the recorder', () => {
+    expect(reduce(inCall(), { type: 'voiceError', reason: 'x' }, TOTAL).effects)
+      .toContain('stopRecording')
+    const dialing = reduce(initialCore(), { type: 'start' }, TOTAL).core
+    expect(reduce(dialing, { type: 'voiceError', reason: 'x' }, TOTAL).effects)
+      .not.toContain('stopRecording')
+  })
+})
+
 describe('end of list & errors', () => {
   it('the last outcome lands on ready with atEnd', () => {
     const lastAwaiting = run(

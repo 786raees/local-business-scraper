@@ -2,24 +2,19 @@ import { useEffect, useRef, useState } from 'react'
 import { send } from '../api'
 import { ActiveCall } from './ActiveCall'
 import { DevHarness } from './DevHarness'
+import { DialFilterPanel } from './DialFilterPanel'
 import { ErrorBanner } from './ErrorBanner'
 import { StartFromPicker } from './StartFromPicker'
 import { UnsyncedChip } from './UnsyncedChip'
 import { timeAgo } from '../../shared/format'
 import { resumeStore } from '../../shared/storage'
 import type { BgToPanel } from '../../shared/messages'
-import type { DialFilter, SessionSnapshot } from '../../shared/types'
+import type { SessionSnapshot } from '../../shared/types'
 
 interface Props {
   spreadsheetId: string
   tabTitle: string
   onChangeList: () => void
-}
-
-const FILTER_LABELS: Record<DialFilter, string> = {
-  all: 'All rows',
-  uncalled: 'Uncalled only',
-  retry: 'Retry (No Answer + Callback)',
 }
 
 /**
@@ -85,11 +80,6 @@ export function SessionHome({ spreadsheetId, tabTitle, onChangeList }: Props) {
     else setError(res.error)
   }
 
-  async function setFilter(next: DialFilter) {
-    const res = await send<SessionSnapshot>({ kind: 'session/setFilter', filter: next })
-    if (res.ok) setSnapshot(res.data)
-  }
-
   if (error) {
     return (
       <div className="banner-error" role="alert">
@@ -153,7 +143,7 @@ export function SessionHome({ spreadsheetId, tabTitle, onChangeList }: Props) {
     )
   }
 
-  const { leads, cursor, currentLead, filter } = snapshot
+  const { leads, cursor, currentLead, criteria } = snapshot
   const returning = cursor > 0 && currentLead && !snapshot.atEnd
   const startLabel = returning
     ? `▶ Resume from row ${currentLead.rowIndex}`
@@ -199,18 +189,12 @@ export function SessionHome({ spreadsheetId, tabTitle, onChangeList }: Props) {
         />
       )}
 
-      <label className="filter-line">
-        <span className="section-caption" style={{ padding: 0 }}>Dial</span>
-        <select
-          className="filter-select"
-          value={filter}
-          onChange={(e) => void setFilter(e.target.value as DialFilter)}
-        >
-          {(Object.keys(FILTER_LABELS) as DialFilter[]).map((f) => (
-            <option key={f} value={f}>{FILTER_LABELS[f]}</option>
-          ))}
-        </select>
-      </label>
+      <DialFilterPanel
+        criteria={criteria}
+        dialable={leads.dialable}
+        excludedBlank={leads.excludedBlank}
+        onChanged={setSnapshot}
+      />
 
       <DevHarness />
 

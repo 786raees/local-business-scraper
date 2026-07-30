@@ -21,7 +21,7 @@ describe('shared contracts (story 00 smoke)', () => {
     const snapshot: SessionSnapshot = {
       phase: 'setup',
       leads: { total: 0, skippedNoPhone: 0, dialable: 0 },
-      filter: 'uncalled',
+      criteria: { status: 'uncalled' },
       cursor: 0,
       callState: 'idle',
       unsyncedOutcomes: 0,

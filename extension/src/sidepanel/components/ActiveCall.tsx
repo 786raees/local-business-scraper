@@ -49,7 +49,14 @@ export function ActiveCall({ snapshot }: { snapshot: SessionSnapshot }) {
           <span className={dotClass} />
           <span>{stateLabel}</span>
           {timer && phase === 'in-call' && <span className="tabular timer">{timer}</span>}
+          {snapshot.recording === 'on' && <span className="rec-chip">● REC</span>}
         </div>
+
+        {snapshot.recording === 'failed' && (
+          <div className="row-sub bad" role="status">
+            Mic blocked — call not recorded.
+          </div>
+        )}
 
         {phase !== 'between-calls' && currentLead && <LeadCard lead={currentLead} />}
       </div>
@@ -57,6 +64,9 @@ export function ActiveCall({ snapshot }: { snapshot: SessionSnapshot }) {
       {phase === 'awaiting-outcome' && (
         <>
           <OutcomePanel preselected={preselectedOutcome} />
+          {snapshot.lastRecording && (
+            <RecordingStrip recording={snapshot.lastRecording} />
+          )}
           {currentLead?.lineType === 'voip' && (
             <div className="voip-hint">
               VoIP number — Wrong Number/DNC may be worth considering if it never connects.
@@ -246,6 +256,30 @@ function BetweenCalls({ nextName, lastOutcome }: { nextName?: string; lastOutcom
           Pause (Esc)
         </button>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Story 16 — the kept recording on S5: basename + duration + Discard. The
+ * worker owns deletion; discarding here just sends the message, and the strip
+ * disappears with the broadcast that follows.
+ */
+function RecordingStrip({ recording }: { recording: { file: string; durationMs: number } }) {
+  const sec = Math.round(recording.durationMs / 1000)
+  const dur = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`
+  return (
+    <div className="recording-strip">
+      <span className="row-sub tabular" title={recording.file}>
+        🎙 {truncateMiddle(recording.file, 30)} · {dur}
+      </span>
+      <button
+        className="btn secondary"
+        title="Delete the file and keep it out of Notes"
+        onClick={() => void send({ kind: 'recording/discard' })}
+      >
+        Discard
+      </button>
     </div>
   )
 }

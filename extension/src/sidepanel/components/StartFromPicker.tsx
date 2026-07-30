@@ -24,7 +24,7 @@ interface Props {
   onClose: () => void
 }
 
-type Excluded = { name: string; callStatus: string | null } | null
+type Excluded = { name: string; reason: string } | null
 
 /**
  * Story 12 — the start-from lead picker. Search by name (digits also match
@@ -151,9 +151,8 @@ export function StartFromPicker({ cursor, resumeName, onPicked, onClose }: Props
 
       {excluded && (
         <div className="row-sub bad" role="status">
-          {excluded.name} is filtered out
-          {excluded.callStatus ? ` (already logged: ${excluded.callStatus})` : ''} — change the
-          Dial filter to include it.
+          {excluded.name} is filtered out ({excluded.reason}) — change the Dial
+          filter to include it.
         </div>
       )}
 

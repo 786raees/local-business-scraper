@@ -9,13 +9,16 @@ import {
   settingsStore,
 } from '../shared/storage'
 import type { BgToPanel, ContentToBg, PanelToBg, Result, TabInfo } from '../shared/messages'
-import type { CallState, DialFilter, SessionSnapshot, SpreadsheetRef } from '../shared/types'
+import type { CallState, DialCriteria, SessionSnapshot, SpreadsheetRef } from '../shared/types'
+import { DEFAULT_CRITERIA, sanitizeCriteria } from '../shared/criteria'
 import {
   dialableLeads,
+  explainExclusion,
   findCursorByName,
   findCursorForRow,
   loadLeads,
   reanchorCursor,
+  tabVocab,
 } from './leads'
 import {
   SHEET_CHANGED_ERROR,
@@ -23,7 +26,15 @@ import {
   namesMatch,
   notesAppend,
   outcomeCells,
+  withRecordingNote,
 } from './outcomes'
+import {
+  discardRecording,
+  recordingFileName,
+  shouldAutoDiscard,
+  startRecording,
+  stopRecording,
+} from './recorder'
 import { cellRange } from '../sheets/client'
 import { WriteQueue } from './writeQueue'
 import type { QueueEntry, QueueState, QueueStore, WriteResult } from './writeQueue'
@@ -32,10 +43,12 @@ import type { Effect, SessionEvent } from './session'
 import {
   buildSnapshot,
   chromeSessionKV,
+  consumeRecordingForOutcome,
   freshState,
   loadState,
   normalizeState,
   persistState,
+  restoreRecordingOnUndo,
 } from './state'
 import type { WorkerState } from './state'
 import { ensureVoiceTab, sendToVoice } from './voiceController'
@@ -55,14 +68,14 @@ const client = new SheetsClient(auth)
 const RINGING_ALARM = 'gvqd-ringing'
 
 let workerState: WorkerState | null = null
-let filter: DialFilter = 'uncalled'
+let criteria: DialCriteria = DEFAULT_CRITERIA
 // The 3s inter-call delay is far below chrome.alarms' 30s floor, so it uses a
 // timeout; a worker killed mid-delay resumes via the between-calls rehydration.
 let delayTimer: ReturnType<typeof setTimeout> | null = null
 
 const ready: Promise<void> = Promise.all([
   loadState(chromeSessionKV).then((s) => { workerState = normalizeState(s) }),
-  settingsStore.get().then((s) => { filter = s.dialFilter }),
+  settingsStore.get().then((s) => { criteria = s.dialCriteria }),
 ]).then(() => {
   void resyncAfterRestart()
   // Queue entries persisted by a dead worker drain on startup.
@@ -94,7 +107,7 @@ function broadcast(snapshot: SessionSnapshot): void {
 }
 
 function snapshot(): SessionSnapshot {
-  const snap = buildSnapshot(workerState, filter)
+  const snap = buildSnapshot(workerState, criteria)
   snap.unsyncedOutcomes = queue.dueCount()
   snap.queuePaused = queue.isPaused() || undefined
   return snap
@@ -155,7 +168,7 @@ async function runEffect(effect: Effect): Promise<void> {
   const settings = await settingsStore.get()
   switch (effect) {
     case 'dial': {
-      const lead = dialableLeads(workerState.leads, filter)[workerState.cursor]
+      const lead = dialableLeads(workerState.leads, criteria)[workerState.cursor]
       if (!lead) {
         await dispatch({ type: 'voiceError', reason: 'Lead at cursor disappeared.' })
         return
@@ -194,6 +207,53 @@ async function runEffect(effect: Effect): Promise<void> {
     case 'saveResume':
       await saveResumePoint()
       return
+    // Story 15: recording brackets the call. Both effects are fire-and-forget
+    // — a capture failure marks the call unrecorded and the session dials on.
+    case 'startRecording': {
+      if (!settings.recordingEnabled) return
+      const state = workerState
+      const lead = dialableLeads(state.leads, criteria)[state.cursor]
+      if (!lead) return
+      void (async () => {
+        const tab = await ensureVoiceTab(false)
+        if (tab.id === undefined) throw new Error('Voice tab has no id.')
+        await startRecording(
+          tab.id,
+          recordingFileName(state.selection.tabTitle, lead, new Date().toISOString()),
+        )
+      })().then(
+        () => { state.recording = 'on'; void persistAndBroadcast() },
+        () => { state.recording = 'failed'; void persistAndBroadcast() },
+      )
+      return
+    }
+    case 'stopRecording': {
+      const state = workerState
+      // Duration on the interpreter's clock — the same one the panel timer
+      // shows, so the auto-discard gate and the UI can never disagree.
+      const durationMs = state.callStartedAt ? Date.now() - state.callStartedAt : 0
+      void stopRecording().then(
+        (saved) => {
+          state.recording = undefined
+          if (!saved) { void persistAndBroadcast(); return }
+          if (shouldAutoDiscard(durationMs, settings.recordingMinSeconds)) {
+            // Too-short calls never surface — file deleted (story 16 decision 4).
+            void discardRecording(saved.downloadId)
+          } else if (state.phase === 'awaiting-outcome') {
+            state.lastRecording = { ...saved, durationMs }
+          }
+          // Any other phase (hard stop): the outcome is discarded, so the ref
+          // must not linger and attach to a later lead's note — but the file
+          // itself stays on disk (story 15: no outcome ⇒ keep, write nothing).
+          void persistAndBroadcast()
+        },
+        () => {
+          if (state.recording === 'on') state.recording = 'failed'
+          void persistAndBroadcast()
+        },
+      )
+      return
+    }
   }
 }
 
@@ -201,7 +261,7 @@ async function dispatch(event: SessionEvent): Promise<SessionSnapshot> {
   await ready
   if (!workerState) throw new Error('No leads loaded.')
   const prevPhase = workerState.phase
-  const dialable = dialableLeads(workerState.leads, filter)
+  const dialable = dialableLeads(workerState.leads, criteria)
   const { core, effects } = reduce(workerState, event, dialable.length)
   workerState = core as WorkerState
 
@@ -224,10 +284,22 @@ async function dispatch(event: SessionEvent): Promise<SessionSnapshot> {
       if (undone && workerState.tally?.[undone]) {
         workerState.tally = { ...workerState.tally, [undone]: workerState.tally[undone]! - 1 }
       }
+      // The recording survives undo — S5 reopens with Discard still possible
+      // (story 16 decision 1).
+      restoreRecordingOnUndo(workerState)
     } else if (entryId) {
       void queue.makeDue(entryId)
+      workerState.pendingRecording = undefined
     }
     workerState.lastOutcome = undefined
+  }
+
+  // Recording indicator/file live only inside the call flow: the notice stays
+  // visible through awaiting-outcome, and a skipped call's filename must never
+  // leak into the NEXT lead's note (the outcome handler consumes it earlier).
+  if (!['dialing', 'in-call', 'awaiting-outcome'].includes(workerState.phase)) {
+    workerState.recording = undefined
+    workerState.lastRecording = undefined
   }
 
   for (const effect of effects) await runEffect(effect)
@@ -282,7 +354,7 @@ async function executeWrite(entry: QueueEntry): Promise<WriteResult> {
 const queue = new WriteQueue(queueStore, executeWrite, {
   async onWritten(entry) {
     if (!workerState || workerState.selection.tabTitle !== entry.tabTitle) return
-    const before = dialableLeads(workerState.leads, filter)
+    const before = dialableLeads(workerState.leads, criteria)
     const i = workerState.leads.findIndex((l) => l.rowIndex === entry.rowIndex)
     if (i !== -1) {
       workerState.leads[i] = applyWriteToLead(workerState.leads[i], entry, new Date().toISOString())
@@ -290,7 +362,7 @@ const queue = new WriteQueue(queueStore, executeWrite, {
     // The write can shrink the filtered list (e.g. `uncalled` drops the
     // just-called lead) — re-anchor so the cursor still points at the same
     // next business instead of skipping one.
-    const after = dialableLeads(workerState.leads, filter)
+    const after = dialableLeads(workerState.leads, criteria)
     workerState.cursor = reanchorCursor(before, after, workerState.cursor)
     await saveResumePoint()
     await persistAndBroadcast()
@@ -349,7 +421,7 @@ function loadingSnapshot(
     spreadsheet: { id: spreadsheetId, name: spreadsheetName },
     tab: { title: tabTitle, rowCount: count },
     leads: { total: count, skippedNoPhone: 0, dialable: 0 },
-    filter,
+    criteria,
     cursor: 0,
     callState: 'idle',
     unsyncedOutcomes: 0,
@@ -393,14 +465,23 @@ async function handle(msg: PanelToBg): Promise<unknown> {
       const name = selection?.spreadsheetName ?? msg.spreadsheetId
       return handleLoadLeads(msg.spreadsheetId, name, msg.sheetTitle)
     }
-    case 'session/setFilter': {
-      filter = msg.filter
-      await settingsStore.set({ dialFilter: filter })
+    case 'session/setCriteria': {
+      // Changing criteria reshapes the dialable list — re-anchor so the
+      // current next-to-dial lead is neither skipped nor repeated (story 14).
+      const before = workerState ? dialableLeads(workerState.leads, criteria) : null
+      criteria = sanitizeCriteria(msg.criteria)
+      await settingsStore.set({ dialCriteria: criteria })
+      if (workerState && before) {
+        const after = dialableLeads(workerState.leads, criteria)
+        workerState.cursor = reanchorCursor(before, after, workerState.cursor)
+        workerState.atEnd = false
+        await saveResumePoint()
+      }
       return persistAndBroadcast()
     }
     case 'session/setCursor': {
       if (!workerState) throw new Error('No leads loaded.')
-      const dialable = dialableLeads(workerState.leads, filter)
+      const dialable = dialableLeads(workerState.leads, criteria)
       if (msg.rowIndex === null) {
         workerState.cursor = 0
       } else {
@@ -421,26 +502,34 @@ async function handle(msg: PanelToBg): Promise<unknown> {
       // The start-from picker's dataset: dialable leads only — it must never
       // offer a lead the session wouldn't dial (story 12 out-of-scope rule).
       if (!workerState) throw new Error('No leads loaded.')
-      return dialableLeads(workerState.leads, filter).map((l) => ({
+      return dialableLeads(workerState.leads, criteria).map((l) => ({
         rowIndex: l.rowIndex, name: l.name, phone: l.phone, callStatus: l.callStatus,
         lineType: l.lineType, lineCarrier: l.lineCarrier,
       }))
     }
+    case 'leads/vocab': {
+      // Stage/Outcome checklist options — sheet-derived (story 14 decision 4).
+      if (!workerState) throw new Error('No leads loaded.')
+      return tabVocab(workerState.leads)
+    }
     case 'leads/searchAll': {
-      // The "filtered out" explanation: is this name in the FULL list?
+      // The "filtered out" explanation: is this name in the FULL list, and
+      // which criterion excluded it?
       if (!workerState) throw new Error('No leads loaded.')
       const q = msg.query.trim().replace(/\s+/g, ' ').toLowerCase()
       if (!q) return null
       const hit = workerState.leads.find(
         (l) => l.name.trim().replace(/\s+/g, ' ').toLowerCase().includes(q))
-      return hit ? { name: hit.name, callStatus: hit.callStatus ?? null, phone: hit.phone } : null
+      return hit
+        ? { name: hit.name, reason: explainExclusion(hit, criteria) ?? 'filtered out' }
+        : null
     }
     case 'session/start': {
       if (!workerState) throw new Error('No leads loaded.')
       // A fresh start (not a resume from pause/error) begins a new S6 tally.
       if (workerState.phase === 'ready') workerState.tally = {}
       if (msg.fromRow !== undefined) {
-        const dialable = dialableLeads(workerState.leads, filter)
+        const dialable = dialableLeads(workerState.leads, criteria)
         const cursor = findCursorForRow(dialable, msg.fromRow)
         if (cursor === null) throw new Error(`No dialable lead at or after row ${msg.fromRow}.`)
         workerState.cursor = cursor
@@ -455,17 +544,20 @@ async function handle(msg: PanelToBg): Promise<unknown> {
     case 'call/outcome': {
       if (!workerState) throw new Error('No session.')
       if (workerState.phase !== 'awaiting-outcome') return snapshot()
-      const lead = dialableLeads(workerState.leads, filter)[workerState.cursor]
+      const lead = dialableLeads(workerState.leads, criteria)[workerState.cursor]
       if (!lead) throw new Error('No lead at cursor.')
       // Enqueue-before-network AND before the transition: the intent is on
       // disk before anything else happens (ARCH §7.3). notBefore holds it
       // through the undo window.
       const settings = await settingsStore.get()
+      // The recorded call's filename rides this outcome's Notes write
+      // (story 15); the ref is stashed so undo can restore it (story 16).
+      const recordingFile = consumeRecordingForOutcome(workerState)
       const entryId = await queue.enqueue({
         rowIndex: lead.rowIndex,
         leadName: lead.name,
         outcome: msg.outcome,
-        note: msg.note?.trim() || undefined,
+        note: withRecordingNote(msg.note?.trim() || undefined, recordingFile),
         spreadsheetId: workerState.selection.spreadsheetId,
         tabTitle: workerState.selection.tabTitle,
         cells: outcomeCells(workerState.mapping, lead.rowIndex),
@@ -499,11 +591,11 @@ async function handle(msg: PanelToBg): Promise<unknown> {
       if (!workerState) throw new Error('No leads loaded.')
       const { selection } = workerState
       const previousName =
-        dialableLeads(workerState.leads, filter)[workerState.cursor]?.name ?? ''
+        dialableLeads(workerState.leads, criteria)[workerState.cursor]?.name ?? ''
       const snap = await handleLoadLeads(
         selection.spreadsheetId, selection.spreadsheetName, selection.tabTitle)
       if (workerState && previousName) {
-        const dialable = dialableLeads(workerState.leads, filter)
+        const dialable = dialableLeads(workerState.leads, criteria)
         const cursor = findCursorByName(dialable, previousName)
         if (cursor !== null) {
           workerState.cursor = cursor
@@ -512,6 +604,16 @@ async function handle(msg: PanelToBg): Promise<unknown> {
         }
       }
       return snap
+    }
+    case 'recording/discard': {
+      // Valid only while a kept recording is showing (S5, incl. undo-reopened).
+      if (!workerState?.lastRecording) return snapshot()
+      const { downloadId } = workerState.lastRecording
+      workerState.lastRecording = undefined
+      // Deletion failure still drops the ref: a Notes line pointing at a
+      // missing file is worse than a lost file (story 16 decision 3).
+      void discardRecording(downloadId)
+      return persistAndBroadcast()
     }
     case 'session/undo':
       return dispatch({ type: 'undo' })

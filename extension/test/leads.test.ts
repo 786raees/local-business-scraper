@@ -118,26 +118,26 @@ describe('start-from picker helpers (story 12)', () => {
   })
 })
 
-describe('dial filters', () => {
+describe('dial filters (status axis — full criteria matrix in criteria.test.ts)', () => {
   const lead = (phone: string, callStatus?: string): Lead =>
     ({ rowIndex: 2, name: 'x', phone, callStatus })
 
   it('never dials a lead without a phone, whatever the filter', () => {
-    expect(matchesFilter(lead(''), 'all')).toBe(false)
-    expect(matchesFilter(lead('', 'No Answer'), 'retry')).toBe(false)
+    expect(matchesFilter(lead(''), { status: 'all' })).toBe(false)
+    expect(matchesFilter(lead('', 'No Answer'), { status: 'retry' })).toBe(false)
   })
 
   it('uncalled = empty Call Status only (DNC rows excluded by construction)', () => {
-    expect(matchesFilter(lead('+1'), 'uncalled')).toBe(true)
-    expect(matchesFilter(lead('+1', 'DNC'), 'uncalled')).toBe(false)
-    expect(matchesFilter(lead('+1', 'Answered'), 'uncalled')).toBe(false)
+    expect(matchesFilter(lead('+1'), { status: 'uncalled' })).toBe(true)
+    expect(matchesFilter(lead('+1', 'DNC'), { status: 'uncalled' })).toBe(false)
+    expect(matchesFilter(lead('+1', 'Answered'), { status: 'uncalled' })).toBe(false)
   })
 
   it('retry = No Answer or Callback only', () => {
-    expect(matchesFilter(lead('+1', 'No Answer'), 'retry')).toBe(true)
-    expect(matchesFilter(lead('+1', 'Callback'), 'retry')).toBe(true)
-    expect(matchesFilter(lead('+1', 'DNC'), 'retry')).toBe(false)
-    expect(matchesFilter(lead('+1'), 'retry')).toBe(false)
+    expect(matchesFilter(lead('+1', 'No Answer'), { status: 'retry' })).toBe(true)
+    expect(matchesFilter(lead('+1', 'Callback'), { status: 'retry' })).toBe(true)
+    expect(matchesFilter(lead('+1', 'DNC'), { status: 'retry' })).toBe(false)
+    expect(matchesFilter(lead('+1'), { status: 'retry' })).toBe(false)
   })
 
   it('finds the start-from cursor at or after a sheet row', () => {
@@ -175,8 +175,8 @@ describe('dial filters', () => {
       lead('+1'), lead('+2', 'No Answer'), lead('+3', 'DNC'),
       lead('+4', 'Callback'), lead(''), lead('+5', 'Interested'),
     ]
-    expect(dialableLeads(leads, 'all')).toHaveLength(5)
-    expect(dialableLeads(leads, 'uncalled')).toHaveLength(1)
-    expect(dialableLeads(leads, 'retry')).toHaveLength(2)
+    expect(dialableLeads(leads, { status: 'all' })).toHaveLength(5)
+    expect(dialableLeads(leads, { status: 'uncalled' })).toHaveLength(1)
+    expect(dialableLeads(leads, { status: 'retry' })).toHaveLength(2)
   })
 })

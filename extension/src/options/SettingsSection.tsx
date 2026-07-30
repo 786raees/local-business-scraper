@@ -1,16 +1,11 @@
 import { useEffect, useState } from 'react'
+import { STATUS_FILTERS, STATUS_LABELS, criteriaSummary } from '../shared/criteria'
 import {
   DEFAULT_SETTINGS,
   SETTINGS_BOUNDS,
   settingsStore,
 } from '../shared/storage'
 import type { DialFilter, Settings } from '../shared/storage'
-
-const FILTER_LABELS: Record<DialFilter, string> = {
-  all: 'All rows',
-  uncalled: 'Uncalled only',
-  retry: 'Retry (No Answer + Callback)',
-}
 
 /** Dialer settings (story 11). Values clamp to SETTINGS_BOUNDS on save. */
 export function SettingsSection() {
@@ -55,17 +50,73 @@ export function SettingsSection() {
       </label>
 
       <label className="setting-row">
-        <span>Default dial filter</span>
+        <span>Default dial status</span>
         <select
           className="keyinput num"
-          value={settings.dialFilter}
-          onChange={(e) => void save({ dialFilter: e.target.value as DialFilter })}
+          value={settings.dialCriteria.status}
+          onChange={(e) => void save({
+            // Only the status axis is edited here — the full criteria set has
+            // ONE editor, the side panel's Dial filter (story 14, no drift).
+            dialCriteria: { ...settings.dialCriteria, status: e.target.value as DialFilter },
+          })}
         >
-          {(Object.keys(FILTER_LABELS) as DialFilter[]).map((f) => (
-            <option key={f} value={f}>{FILTER_LABELS[f]}</option>
+          {STATUS_FILTERS.map((f) => (
+            <option key={f} value={f}>{STATUS_LABELS[f]}</option>
           ))}
         </select>
       </label>
+
+      <div className="hint" style={{ marginTop: 0 }}>
+        Active filter: {criteriaSummary(settings.dialCriteria)} — edit the full
+        set from the side panel&apos;s Dial filter.
+      </div>
+
+      <div className="hint" style={{ marginTop: 8 }}>Call recording</div>
+
+      <label className="setting-row">
+        <span>
+          I am responsible for complying with call recording laws in my
+          jurisdiction (many require all-party consent). The extension records
+          silently — announcing the recording is my obligation.
+        </span>
+        <input
+          type="checkbox"
+          checked={!!settings.recordingConsentAt}
+          onChange={(e) => void save(
+            e.target.checked
+              ? { recordingConsentAt: new Date().toISOString() }
+              // Withdrawing consent also forces recording off (clampSettings).
+              : { recordingConsentAt: undefined, recordingEnabled: false },
+          )}
+        />
+      </label>
+
+      <label className="setting-row">
+        <span>
+          Record calls (saved to Downloads/gv-quick-dial, filename logged into
+          the row&apos;s Notes)
+        </span>
+        <input
+          type="checkbox"
+          disabled={!settings.recordingConsentAt}
+          checked={settings.recordingEnabled}
+          onChange={(e) => void save({ recordingEnabled: e.target.checked })}
+        />
+      </label>
+
+      {settings.recordingEnabled && (
+        <label className="setting-row">
+          <span>Discard recordings shorter than (seconds, 0 = keep all)</span>
+          <input
+            className="keyinput num"
+            type="number"
+            min={SETTINGS_BOUNDS.recordingMinSeconds.min}
+            max={SETTINGS_BOUNDS.recordingMinSeconds.max}
+            value={settings.recordingMinSeconds}
+            onChange={(e) => void save({ recordingMinSeconds: Number(e.target.value) })}
+          />
+        </label>
+      )}
 
       <div>
         <button

@@ -19,7 +19,16 @@
       "32": "public/icons/icon32.png"
     }
   },
-  "permissions": ["sidePanel", "storage", "scripting", "tabs", "alarms"],
+  "permissions": [
+    "sidePanel",
+    "storage",
+    "scripting",
+    "tabs",
+    "alarms",
+    "tabCapture",
+    "offscreen",
+    "downloads"
+  ],
   "host_permissions": [
     "https://voice.google.com/*",
     "https://sheets.googleapis.com/*",

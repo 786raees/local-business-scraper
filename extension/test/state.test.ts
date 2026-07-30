@@ -33,13 +33,13 @@ const STATE: WorkerState = {
 
 describe('buildSnapshot', () => {
   it('maps worker state to the wire snapshot with filtered dialable counts', () => {
-    const snap = buildSnapshot(STATE, 'uncalled')
+    const snap = buildSnapshot(STATE, { status: 'uncalled' })
     expect(snap).toMatchObject({
       phase: 'ready',
       spreadsheet: { id: 'sid', name: 'Atlas Leads' },
       tab: { title: 'Miami', rowCount: 4 },
       leads: { total: 4, skippedNoPhone: 1, dialable: 2 }, // A and D (C has a status, B no phone)
-      filter: 'uncalled',
+      criteria: { status: 'uncalled' },
     })
     // Cursor 5 clamps into the 2-lead dialable list and resolves the current lead.
     expect(snap.cursor).toBe(1)
@@ -47,9 +47,15 @@ describe('buildSnapshot', () => {
   })
 
   it('computes dialable per filter', () => {
-    expect(buildSnapshot(STATE, 'all').leads.dialable).toBe(3)
-    expect(buildSnapshot(STATE, 'retry').leads.dialable).toBe(1)
-    expect(buildSnapshot(STATE, 'retry').currentLead?.name).toBe('C')
+    expect(buildSnapshot(STATE, { status: 'all' }).leads.dialable).toBe(3)
+    expect(buildSnapshot(STATE, { status: 'retry' }).leads.dialable).toBe(1)
+    expect(buildSnapshot(STATE, { status: 'retry' }).currentLead?.name).toBe('C')
+  })
+
+  it('surfaces blank-data exclusions only when a blank-sensitive axis is active', () => {
+    expect(buildSnapshot(STATE, { status: 'all' }).leads.excludedBlank).toBeUndefined()
+    const snap = buildSnapshot(STATE, { status: 'all', rating: { op: 'gte', value: 4 } })
+    expect(snap.leads.excludedBlank?.rating).toBe(3) // no lead has a rating
   })
 
   it('yields the pick-sheet phase when no state exists', () => {

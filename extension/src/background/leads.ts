@@ -1,7 +1,16 @@
 import { cellRange } from '../sheets/client'
 import { buildMapping, columnLetter, rowToLead } from '../sheets/mapping'
 import type { HeaderMapping } from '../sheets/mapping'
-import type { DialFilter, Lead } from '../shared/types'
+import { CALL_STATUS_VALUES } from '../sheets/vocab'
+import { LINE_TYPE_FILTERS, opText } from '../shared/criteria'
+import type {
+  BlankExclusions,
+  DialCriteria,
+  DialFilter,
+  Lead,
+  LineTypeFilter,
+  NumberFilter,
+} from '../shared/types'
 
 /**
  * Lead loading (ARCHITECTURE §5.4): header row via mapping, then paged reads
@@ -51,13 +60,13 @@ export async function loadLeads(
 }
 
 /**
- * Filter predicates (UX S3.5). A lead with no phone is never dialable.
- * `uncalled` and `retry` both exclude DNC by construction: DNC is a logged
- * status, so it is neither empty nor in the retry set.
+ * The single dial-criteria evaluator (story 14): AND across axes, OR within a
+ * multi-select axis. A lead with no phone is never dialable. `uncalled` and
+ * `retry` both exclude DNC by construction: DNC is a logged status, so it is
+ * neither empty nor in the retry set.
  */
-export function matchesFilter(lead: Lead, filter: DialFilter): boolean {
-  if (!lead.phone) return false
-  switch (filter) {
+function matchesStatus(lead: Lead, status: DialFilter): boolean {
+  switch (status) {
     case 'all':
       return true
     case 'uncalled':
@@ -67,8 +76,143 @@ export function matchesFilter(lead: Lead, filter: DialFilter): boolean {
   }
 }
 
-export function dialableLeads(leads: Lead[], filter: DialFilter): Lead[] {
-  return leads.filter((l) => matchesFilter(l, filter))
+/** Blank or unrecognised line values both read as 'unknown' — mirrors Atlas's store filter. */
+function leadLineKind(lead: Lead): LineTypeFilter {
+  const t = (lead.lineType ?? '').trim().toLowerCase()
+  return LINE_TYPE_FILTERS.includes(t as LineTypeFilter) && t !== 'unknown'
+    ? (t as LineTypeFilter)
+    : 'unknown'
+}
+
+/** Sheet cells are strings; NaN counts as blank, never 0 (story 14 decision 5). */
+function numValue(s?: string): number | null {
+  const t = (s ?? '').trim().replace(/,/g, '')
+  if (!t) return null
+  const n = Number(t)
+  return Number.isFinite(n) ? n : null
+}
+
+const cmp = (n: number, f: NumberFilter): boolean =>
+  f.op === 'lt' ? n < f.value : n >= f.value
+
+/**
+ * lenientBlanks lets excludedBlankCounts ask "would this lead match if its
+ * blank values were ignored?" — the caption that separates "filtered" from
+ * "sheet has no data" (story 14 decision 3).
+ */
+function matches(lead: Lead, c: DialCriteria, lenientBlanks: boolean): boolean {
+  if (!lead.phone) return false
+  if (!matchesStatus(lead, c.status)) return false
+  if (c.outcomes?.length
+    && !(lead.callStatus && (c.outcomes as string[]).includes(lead.callStatus))) return false
+  if (c.stages?.length && !(lead.stage && c.stages.includes(lead.stage))) return false
+  const site = (lead.website ?? '').trim()
+  if (c.website === 'has' && !site) return false
+  if (c.website === 'none' && site) return false
+  if (c.lineTypes?.length) {
+    const blank = !(lead.lineType ?? '').trim()
+    if (!c.lineTypes.includes(leadLineKind(lead)) && !(lenientBlanks && blank)) return false
+  }
+  for (const [f, cell] of [
+    [c.reviewCount, lead.reviewCount],
+    [c.rating, lead.rating],
+  ] as const) {
+    if (!f) continue
+    const n = numValue(cell)
+    if (n === null) {
+      if (!lenientBlanks) return false
+    } else if (!cmp(n, f)) {
+      return false
+    }
+  }
+  return true
+}
+
+export function matchesFilter(lead: Lead, criteria: DialCriteria): boolean {
+  return matches(lead, criteria, false)
+}
+
+export function dialableLeads(leads: Lead[], criteria: DialCriteria): Lead[] {
+  return leads.filter((l) => matchesFilter(l, criteria))
+}
+
+/**
+ * How many leads are excluded ONLY because a filtered value is blank in the
+ * sheet — they'd match with that blank ignored. Powers the "12 leads have no
+ * rating and are excluded" caption so blank data never silently disappears.
+ */
+export function excludedBlankCounts(leads: Lead[], c: DialCriteria): BlankExclusions {
+  const out: BlankExclusions = { rating: 0, reviewCount: 0, lineType: 0 }
+  const lineSensitive = !!c.lineTypes?.length && !c.lineTypes.includes('unknown')
+  if (!c.rating && !c.reviewCount && !lineSensitive) return out
+  for (const l of leads) {
+    if (matches(l, c, false) || !matches(l, c, true)) continue
+    if (c.rating && numValue(l.rating) === null) out.rating++
+    if (c.reviewCount && numValue(l.reviewCount) === null) out.reviewCount++
+    if (lineSensitive && !(l.lineType ?? '').trim()) out.lineType++
+  }
+  return out
+}
+
+/**
+ * Names the first criterion that excludes a lead — the picker's zero-match
+ * explainer ("Acme is filtered out — line type is landline"). null = it matches.
+ */
+export function explainExclusion(lead: Lead, c: DialCriteria): string | null {
+  if (matchesFilter(lead, c)) return null
+  if (!lead.phone) return 'no phone number'
+  if (!matchesStatus(lead, c.status)) {
+    return c.status === 'uncalled'
+      ? `already logged: ${lead.callStatus}`
+      : `Call Status is ${lead.callStatus || 'empty'}, filter retries No Answer/Callback`
+  }
+  if (c.outcomes?.length
+    && !(lead.callStatus && (c.outcomes as string[]).includes(lead.callStatus))) {
+    return lead.callStatus ? `Call Status is ${lead.callStatus}` : 'no Call Status logged'
+  }
+  if (c.stages?.length && !(lead.stage && c.stages.includes(lead.stage))) {
+    return lead.stage ? `Stage is ${lead.stage}` : 'no Stage set'
+  }
+  const site = (lead.website ?? '').trim()
+  if (c.website === 'has' && !site) return 'no website'
+  if (c.website === 'none' && site) return 'has a website'
+  if (c.lineTypes?.length && !c.lineTypes.includes(leadLineKind(lead))) {
+    const blank = !(lead.lineType ?? '').trim()
+    return blank ? 'line type unknown' : `line type is ${leadLineKind(lead)}`
+  }
+  const reviews = numValue(lead.reviewCount)
+  if (c.reviewCount && (reviews === null || !cmp(reviews, c.reviewCount))) {
+    return reviews === null
+      ? 'no review count in the sheet'
+      : `${reviews} reviews, filter wants ${opText(c.reviewCount)}`
+  }
+  const rating = numValue(lead.rating)
+  if (c.rating && (rating === null || !cmp(rating, c.rating))) {
+    return rating === null
+      ? 'no rating in the sheet'
+      : `rating ${rating}, filter wants ${opText(c.rating)}`
+  }
+  return 'filtered out'
+}
+
+/**
+ * Stage/Outcome checklist options: the canonical vocabulary plus whatever the
+ * tab actually contains (story 14 decision 4 — CRM-customised sheets filter too).
+ */
+export function tabVocab(leads: Lead[]): { stages: string[]; outcomes: string[] } {
+  const stages = new Set<string>()
+  const extraOutcomes = new Set<string>()
+  for (const l of leads) {
+    if (l.stage?.trim()) stages.add(l.stage.trim())
+    const status = l.callStatus?.trim()
+    if (status && !(CALL_STATUS_VALUES as readonly string[]).includes(status)) {
+      extraOutcomes.add(status)
+    }
+  }
+  return {
+    stages: [...stages].sort((a, b) => a.localeCompare(b)),
+    outcomes: [...CALL_STATUS_VALUES, ...[...extraOutcomes].sort((a, b) => a.localeCompare(b))],
+  }
 }
 
 /**
