@@ -121,6 +121,41 @@ describe('ResultsStore deduplication', () => {
     expect(s.insert(biz('Acme', { placeId: 'ChIJabc' }))).toBe(true)
     expect(s.insert(biz('Acme', { placeId: 'ChIJabc' }))).toBe(false)
   })
+
+  // Asked before every detail navigation (story 06): a known place is skipped
+  // without opening its page, so this must be exact and blank-safe.
+  it('hasPlaceId answers for stored ids only', () => {
+    const s = new ResultsStore(':memory:')
+    s.insert(biz('Acme', { placeId: 'ChIJabc' }))
+    expect(s.hasPlaceId('ChIJabc')).toBe(true)
+    expect(s.hasPlaceId('ChIJnope')).toBe(false)
+  })
+
+  it('hasPlaceId is never true for a blank id, even with id-less rows stored', () => {
+    const s = new ResultsStore(':memory:')
+    s.insert(biz('No Id'))
+    expect(s.hasPlaceId('')).toBe(false)
+  })
+
+  // Mirrors handleEvent in index.ts (story 06): an enrichment update merges via
+  // insert but adjusts neither counter — otherwise every enriched row would show
+  // up as a "duplicate" in the TopBar and the dedup metric becomes noise.
+  it('an enrichment update merges without counting as new or duplicate', () => {
+    const s = new ResultsStore(':memory:')
+    let inserted = 0
+    let duplicates = 0
+    const handle = (b: ReturnType<typeof biz>, update?: boolean) => {
+      if (update) s.insert(b)
+      else if (s.insert(b)) inserted++
+      else duplicates++
+    }
+    handle(biz('Acme', { placeId: 'p1' }))
+    handle(biz('Acme', { placeId: 'p1', email: 'late@enrich.com' }), true)
+    handle(biz('Acme', { placeId: 'p1' }))   // a genuine overlap re-sighting
+    expect(inserted).toBe(1)
+    expect(duplicates).toBe(1)
+    expect(s.queryPage(0, 1)[0].email).toBe('late@enrich.com')
+  })
 })
 
 describe('ResultsStore lineType', () => {

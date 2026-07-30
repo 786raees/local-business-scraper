@@ -4,7 +4,7 @@ import { WsHub } from './ws/hub.js'
 import { listCountries, listStates, listCities } from './geo/geoData.js'
 import { lookupZips } from './geo/zipLookup.js'
 import { JobRunner } from './queue/jobRunner.js'
-import { scrapeMaps } from './scraper/mapsScraper.js'
+import { createMapsSession, MapsSession } from './scraper/mapsScraper.js'
 import { ResultsStore } from './db/store.js'
 import { SheetsAuth } from './sheets/auth.js'
 import { SheetsClient } from './sheets/client.js'
@@ -17,15 +17,28 @@ const sheetsAuth = new SheetsAuth()
 const sheetsClient = new SheetsClient(sheetsAuth)
 
 let hub: WsHub
-// Website enrichment (email + socials) happens inside scrapeMaps using the browser.
-// `viewport` must be forwarded — it is what confines a task to its grid tile.
-// `() => inserted` is the job budget's meter: maxResults counts unique places stored,
-// so duplicate sightings from overlapping tiles never consume it.
+// One MapsSession per job (story 06): the lifecycle hooks create the shared
+// browser + enrichment pool, drain enrichment before job-done, and always close.
+// `store.hasPlaceId` is what lets overlapping tiles skip known places before any
+// detail navigation. `viewport` must be forwarded — it confines a task to its
+// grid tile. `() => inserted` is the job budget's meter: maxResults counts
+// unique places stored, so duplicate sightings never consume it.
+let session: MapsSession | null = null
 const runner = new JobRunner(
   (keyword, location, settings, onRow, signal, viewport) =>
-    scrapeMaps(keyword, location, settings, onRow, signal, viewport),
+    session!.scrape(keyword, location, settings, onRow, signal, viewport),
   undefined,
   () => inserted,
+  {
+    start: async (settings) => {
+      session = await createMapsSession(settings, (id) => store.hasPlaceId(id))
+    },
+    drain: () => session?.drain() ?? Promise.resolve(),
+    close: async () => {
+      await session?.close()
+      session = null
+    },
+  },
 )
 
 // Persist rows to the DB and broadcast a throttled count instead of one
@@ -37,7 +50,9 @@ function handleEvent(e: JobEvent): void {
   if (e.type === 'row') {
     // Adjacent grid tiles overlap by design, so the same place arrives repeatedly.
     // Only genuinely new places count — otherwise the UI total is meaningless.
-    if (store.insert(e.business)) inserted++
+    // Enrichment updates merge into their row and count as neither new nor dupe.
+    if (e.update) store.insert(e.business)
+    else if (store.insert(e.business)) inserted++
     else duplicates++
     const now = Date.now()
     if (now - lastCountAt > 400) {

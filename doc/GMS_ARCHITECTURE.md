@@ -57,7 +57,10 @@ With `segment` on, `expandSegmentedTasks`:
 Rules learned the hard way:
 1. **Tiles overlap by design** → dedup is mandatory; identity is `Business.placeId` parsed
    from the `!19s` URL segment. `ResultsStore.insert` upserts on it; only new rows increment
-   the UI count.
+   the UI count. Dedup also runs **before navigation** (story 06): feed hrefs carry the
+   placeId, so known places are skipped via `store.hasPlaceId`/`partitionUrls` without
+   paying the detail visit — at ~80% overlap that was most of the job's wall-clock. URLs
+   with no parseable id are always visited (never drop unidentifiable results).
 2. **Longitude spacing is computed per latitude row** (`kmPerDegLng`) — a fixed degree step
    halves coverage across northern Europe.
 3. **Over `maxTiles` the grid coarsens, never truncates** — truncation once returned Woking
@@ -65,11 +68,21 @@ Rules learned the hard way:
 
 ## 4. Scraper pipeline (`scraper/`)
 
-`mapsScraper.ts` drives Playwright: scroll the results feed → visit each detail page →
-build a `Business`. Optional enrichment runs in the same browser per `JobSettings`:
-`siteScraper.ts` (business website) → `emailScraper.ts` (real email) + social/directory
-links; `ownerExtract.ts` (+ `whois.ts` RDAP) derives owner name/title offline via
-`compromise`.
+`createMapsSession` (`mapsScraper.ts`) opens **one browser per job** — `JobRunner`'s
+lifecycle hooks (`start`/`drain`/`close`) create it, drain background work before
+`job-done`, and always close it, even on abort. Per task it drives Playwright: scroll the
+results feed (polling for growth, not fixed sleeps; a tile whose new links are all
+already-known stops early) → skip known placeIds → visit each fresh detail page → build a
+`Business`, emitted immediately with GMB data.
+
+Optional enrichment runs per `JobSettings` through `enrichPool.ts` — a ≤3-worker queue
+against the businesses' own websites (google.com navigation stays strictly serial with
+randomized delays). `siteScraper.ts` is **static-first**: a plain fetch of each contact
+path with the same extractors on the raw HTML; the browser page opens only when the static
+pass yields no signal. `emailScraper.ts` picks the best email; `ownerExtract.ts`
+(+ `whois.ts` RDAP) derives owner name/title offline via `compromise`. Enrichment
+re-emits the row with `update: true`: the store's blank-fill merge applies it, and
+`handleEvent` counts it as neither new nor duplicate.
 
 Invariants:
 - **All Maps DOM selectors live in `scraper/selectors.ts`** — the single source of truth.

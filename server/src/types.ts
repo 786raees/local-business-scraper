@@ -145,7 +145,12 @@ export type TaskStatus = 'queued' | 'running' | 'done' | 'error' | 'blocked'
 
 export type JobEvent =
   | { type: 'task-update'; taskId: string; status: TaskStatus; count?: number; error?: string; label?: string }
-  | { type: 'row'; business: Business }
+  /**
+   * `update` marks a late enrichment merge for an already-emitted row: it must
+   * increment neither the unique count nor the duplicate count, or the TopBar's
+   * dedup metric turns into noise.
+   */
+  | { type: 'row'; business: Business; update?: boolean }
   | { type: 'count'; total: number; duplicates?: number }
   | { type: 'progress'; done: number; total: number }
   | { type: 'job-done' }

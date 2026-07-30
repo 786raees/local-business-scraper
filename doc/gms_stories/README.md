@@ -24,4 +24,13 @@ extension story `../extension_stories/13-line-type-display.md` shows the type du
 | 04 | [API & UI](04-linetype-api-and-ui.md) | `Line:` filter select + chip column in the web app |
 | 05 | [Exports & polish](05-linetype-exports-and-polish.md) | CSV/Sheets columns, docs; unblocks extension story 13 |
 
+## Feature: scrape throughput (story 06)
+
+Make segmented + enriched jobs fast: dedup by placeId *before* the detail navigation,
+per-job browser reuse, a concurrent static-first enrichment pool, and adaptive waits.
+
+| # | Story | Ships |
+|---|---|---|
+| 06 | [Scrape throughput](06-scrape-throughput.md) | Pre-navigation dedup, enrichment pool, one browser per job, trimmed waits |
+
 Further backlog candidates live in `GMS_PRD.md` §5.

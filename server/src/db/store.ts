@@ -38,6 +38,7 @@ export class ResultsStore {
   private db: Db
   private insertStmt: Stmt
   private mergeStmt: Stmt
+  private hasStmt: Stmt
 
   constructor(path = 'results.db') {
     this.db = new DatabaseSync(path)
@@ -87,6 +88,7 @@ export class ResultsStore {
     this.mergeStmt = this.db.prepare(
       `UPDATE results SET ${merges.join(', ')} WHERE placeId = ?`,
     )
+    this.hasStmt = this.db.prepare('SELECT 1 FROM results WHERE placeId = ?')
   }
 
   /**
@@ -112,6 +114,17 @@ export class ResultsStore {
     params.push(b.placeId)
     this.mergeStmt.run(...params)
     return false
+  }
+
+  /**
+   * Whether a place is already stored — asked by the scraper *before* opening a
+   * detail page, so overlapping grid tiles skip known places instead of paying a
+   * full navigation + enrichment to rediscover them. Blank ids are never "known":
+   * unidentifiable rows must always be visited.
+   */
+  hasPlaceId(placeId: string): boolean {
+    if (!placeId) return false
+    return this.hasStmt.get(placeId) !== undefined
   }
 
   /** Release the file handle. Windows keeps the db locked until this runs. */

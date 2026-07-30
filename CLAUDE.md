@@ -50,7 +50,10 @@ Data flows in one direction: **job request → queue → scraper → SQLite → 
   London returns 67 rows unsegmented, 197 from just two 5km tiles. Rules that fall out:
   1. **Tiles overlap by design**, so dedup is mandatory — identity is `Business.placeId`, Google's
      canonical place id parsed from the `!19s` URL segment. `ResultsStore.insert` upserts on it and
-     returns whether the row was new; only new rows increment the UI count.
+     returns whether the row was new; only new rows increment the UI count. Dedup also runs
+     **before navigation**: the feed hrefs carry the placeId, so `scrapeMaps` skips known places
+     (`store.hasPlaceId` via `partitionUrls`) without paying the detail visit + enrichment —
+     at ~80% overlap that was most of the job's wall-clock.
   2. **Longitude spacing must be computed per latitude row.** A degree of longitude is 111km at the
      equator but 57km at Stockholm. A fixed degree step silently halves coverage across northern
      Europe. See `kmPerDegLng` in `geo/grid.ts`.
@@ -64,10 +67,16 @@ Data flows in one direction: **job request → queue → scraper → SQLite → 
   and `/review/i` never match and every European row comes back with a null rating. Rating and review
   count live in **two sibling aria-labels** under `div.F7nice` — both must be read and joined.
 
-- **Scraper pipeline** (`server/src/scraper/`): `mapsScraper.ts` drives Playwright (scroll feed →
-  visit each detail page). Optional enrichment, controlled by `JobSettings`, runs in the same browser:
-  `siteScraper.ts` (visits the business website) → `emailScraper.ts` (real email) + social/directory
-  links; `ownerExtract.ts` + `whois.ts` derive an owner name (offline NLP via `compromise` + RDAP WHOIS).
+- **Scraper pipeline** (`server/src/scraper/`): `createMapsSession` opens **one browser per job**
+  (`JobRunner`'s lifecycle hooks create/drain/close it — never one per tile) and drives Playwright:
+  scroll feed → skip known placeIds → visit each fresh detail page. Optional enrichment, controlled
+  by `JobSettings`, runs through `enrichPool.ts` (≤3 concurrent, third-party sites only — google.com
+  navigation stays serial with randomized delays): `siteScraper.ts` tries a plain **static fetch
+  first** and opens a browser page only when the raw HTML yields no signal; `emailScraper.ts` (real
+  email) + social/directory links; `ownerExtract.ts` + `whois.ts` derive an owner name (offline NLP
+  via `compromise` + RDAP WHOIS). Rows emit with GMB data immediately; enrichment re-emits as a
+  `row` event with `update: true`, which merges via the store's blank-fill and **counts as neither
+  new nor duplicate** in `handleEvent`.
 
 - **All Google Maps DOM selectors live in `server/src/scraper/selectors.ts`.** This is the single source
   of truth. If scraping returns 0 rows after a Google markup change, fix only this file.

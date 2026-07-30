@@ -2,12 +2,28 @@ import { TaskSpec, JobSettings, JobEvent, Business, LocationSpec, Viewport } fro
 import { areaFromLocation, GeoArea } from '../geo/geocode.js'
 import { tileGrid } from '../geo/grid.js'
 
+type OnRow = (b: Business, update?: boolean) => void
+
 type ScrapeFn = (
   keyword: string, location: string, settings: JobSettings,
-  onRow: (b: Business) => void, signal?: AbortSignal, viewport?: Viewport,
+  onRow: OnRow, signal?: AbortSignal, viewport?: Viewport,
 ) => Promise<Business[]>
 
 type GeocodeFn = (loc: LocationSpec) => Promise<GeoArea | null>
+
+/**
+ * Per-job resources around the task loop (story 06): one browser serves every
+ * tile instead of a cold start per task, and background enrichment gets drained
+ * before job-done so late merges never race the "job finished" signal.
+ */
+export interface JobLifecycle {
+  /** Create per-job resources (browser, enrichment pool). */
+  start?(settings: JobSettings): Promise<void>
+  /** Wait for queued background work (enrichment updates) to finish. */
+  drain?(): Promise<void>
+  /** Always runs, even on abort or error — releases the browser. */
+  close?(): Promise<void>
+}
 
 export function locationToQuery(loc: LocationSpec): string {
   const base = [loc.city, loc.state, loc.country].filter(Boolean).join(', ')
@@ -90,6 +106,7 @@ export class JobRunner {
     private scrape: ScrapeFn,
     private geocode: GeocodeFn = areaFromLocation,
     private uniqueCount?: () => number,
+    private lifecycle: JobLifecycle = {},
   ) {}
 
   stop(): void { this.controller?.abort() }
@@ -109,30 +126,51 @@ export class JobRunner {
     let done = 0
     emit({ type: 'progress', done, total: tasks.length })
 
-    for (const task of tasks) {
-      if (this.controller.signal.aborted) break
-      const remaining = budget - this.spent()
-      // Budget met — the job is finished even though tiles remain unvisited.
-      if (remaining <= 0) {
-        emit({ type: 'progress', done: tasks.length, total: tasks.length })
-        break
-      }
+    // A browser that cannot launch fails the job up front, visibly — not one
+    // cryptic error per tile.
+    try {
+      await this.lifecycle.start?.(settings)
+    } catch (err) {
+      emit({ type: 'task-update', taskId: 'session', status: 'error', error: String(err), label: 'browser session' })
+      emit({ type: 'job-done' })
+      return
+    }
 
-      emit({ type: 'task-update', taskId: task.id, status: 'running', label: task.label })
-      const query = locationToQuery(task.location)
-      // Hand each task only what is left, so the last one stops on the exact total
-      // instead of overshooting by a whole tile.
-      const taskSettings: JobSettings = { ...settings, maxResults: remaining }
-      try {
-        const rows = await this.scrape(task.keyword, query, taskSettings,
-          (b) => { this.emitted++; emit({ type: 'row', business: b }) },
-          this.controller.signal, task.viewport)
-        emit({ type: 'task-update', taskId: task.id, status: 'done', count: rows.length, label: task.label })
-      } catch (err) {
-        emit({ type: 'task-update', taskId: task.id, status: 'error', error: String(err), label: task.label })
+    // Enrichment updates for an already-emitted row merge without counting.
+    const onRow: OnRow = (b, update) => {
+      if (!update) this.emitted++
+      emit(update ? { type: 'row', business: b, update: true } : { type: 'row', business: b })
+    }
+
+    try {
+      for (const task of tasks) {
+        if (this.controller.signal.aborted) break
+        const remaining = budget - this.spent()
+        // Budget met — the job is finished even though tiles remain unvisited.
+        if (remaining <= 0) {
+          emit({ type: 'progress', done: tasks.length, total: tasks.length })
+          break
+        }
+
+        emit({ type: 'task-update', taskId: task.id, status: 'running', label: task.label })
+        const query = locationToQuery(task.location)
+        // Hand each task only what is left, so the last one stops on the exact total
+        // instead of overshooting by a whole tile.
+        const taskSettings: JobSettings = { ...settings, maxResults: remaining }
+        try {
+          const rows = await this.scrape(task.keyword, query, taskSettings,
+            onRow, this.controller.signal, task.viewport)
+          emit({ type: 'task-update', taskId: task.id, status: 'done', count: rows.length, label: task.label })
+        } catch (err) {
+          emit({ type: 'task-update', taskId: task.id, status: 'error', error: String(err), label: task.label })
+        }
+        done++
+        emit({ type: 'progress', done, total: tasks.length })
       }
-      done++
-      emit({ type: 'progress', done, total: tasks.length })
+      // Let queued enrichment land before job-done; on abort, close() drops it.
+      if (!this.controller.signal.aborted) await this.lifecycle.drain?.()
+    } finally {
+      await this.lifecycle.close?.().catch(() => {})
     }
     emit({ type: 'job-done' })
   }

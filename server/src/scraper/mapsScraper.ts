@@ -5,9 +5,11 @@ import { SELECTORS } from './selectors.js'
 import { parseRating, parsePriceLevel, placeIdFromUrl, cleanText } from './listingParser.js'
 import { buildSearchUrl, jitter } from './searchUrl.js'
 import { Viewport } from '../geo/grid.js'
-import { scrapeWebsite } from './siteScraper.js'
+import { scrapeWebsite, UA } from './siteScraper.js'
+import { EnrichPool } from './enrichPool.js'
 
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
+export type OnRow = (b: Business, update?: boolean) => void
+export type IsKnown = (placeId: string) => boolean
 
 function delay(min: number, max: number): Promise<void> {
   return new Promise((r) => setTimeout(r, jitter(min, max)))
@@ -23,21 +25,88 @@ async function dismissConsent(page: Page): Promise<void> {
   } catch { /* no consent shown */ }
 }
 
-async function scrollFeed(page: Page, maxResults: number, signal?: AbortSignal): Promise<string[]> {
+/**
+ * Split feed URLs into fresh (worth a detail visit) and known (already stored).
+ * A URL whose place id cannot be parsed is always fresh — dropping unidentifiable
+ * results would silently lose real businesses; the store keeps NULL placeIds
+ * distinct for the same reason.
+ */
+export function partitionUrls(urls: string[], isKnown: IsKnown): { fresh: string[]; known: string[] } {
+  const fresh: string[] = []
+  const known: string[] = []
+  for (const url of urls) {
+    const id = placeIdFromUrl(url)
+    if (id && isKnown(id)) known.push(url)
+    else fresh.push(url)
+  }
+  return { fresh, known }
+}
+
+/** Scroll-loop stop bookkeeping, pure so the stop conditions are unit-testable. */
+export interface FeedProgress { stagnant: number; knownRounds: number }
+
+export function advanceFeedProgress(p: FeedProgress, newUrls: number, freshAdded: number): FeedProgress {
+  if (!newUrls) return { stagnant: p.stagnant + 1, knownRounds: p.knownRounds }
+  return { stagnant: 0, knownRounds: freshAdded ? 0 : p.knownRounds + 1 }
+}
+
+/**
+ * Give up on a tile when the feed stops growing — or when two consecutive rounds
+ * brought only already-known places: an exhausted overlap tile isn't worth
+ * scrolling to the bottom of.
+ */
+export function feedExhausted(p: FeedProgress): boolean {
+  return p.stagnant >= 4 || p.knownRounds >= 2
+}
+
+/**
+ * Wait for the feed to grow past `prevCount` links, polling instead of the old
+ * unconditional 1500ms sleep — most scroll rounds render new results well before
+ * the cap, so the fixed sleep wasted most of its time.
+ */
+async function waitForFeedGrowth(page: Page, prevCount: number, capMs = 1500, stepMs = 250): Promise<void> {
+  for (let waited = 0; waited < capMs; waited += stepMs) {
+    await page.waitForTimeout(stepMs)
+    const n = await page.locator(SELECTORS.resultLink).count().catch(() => prevCount)
+    if (n > prevCount) return
+  }
+}
+
+/**
+ * Scroll the results feed collecting *fresh* URLs (known places filtered out
+ * before any navigation — story 06). Stops when the fresh budget is met, the
+ * feed stagnates, or two consecutive rounds brought only already-known places
+ * (an exhausted overlap tile isn't worth scrolling to the bottom of).
+ */
+async function scrollFeed(page: Page, maxFresh: number, isKnown: IsKnown, signal?: AbortSignal): Promise<string[]> {
   const seen = new Set<string>()
-  let stagnant = 0
-  while (seen.size < maxResults && stagnant < 4) {
+  const freshIds = new Set<string>()
+  const fresh: string[] = []
+  let progress: FeedProgress = { stagnant: 0, knownRounds: 0 }
+  while (fresh.length < maxFresh && !feedExhausted(progress)) {
     if (signal?.aborted) break
     const links = await page.locator(SELECTORS.resultLink).evaluateAll(
       (els) => els.map((e) => (e as HTMLAnchorElement).href),
     )
-    const before = seen.size
-    for (const l of links) if (seen.size < maxResults) seen.add(l)
-    if (seen.size === before) stagnant++; else stagnant = 0
+    const newUrls = links.filter((l) => !seen.has(l))
+    for (const l of newUrls) seen.add(l)
+    let freshAdded = 0
+    for (const url of partitionUrls(newUrls, isKnown).fresh) {
+      if (fresh.length >= maxFresh) break
+      // The same place can surface under several URLs within one tile; dedup on id.
+      const id = placeIdFromUrl(url)
+      if (id) {
+        if (freshIds.has(id)) continue
+        freshIds.add(id)
+      }
+      fresh.push(url)
+      freshAdded++
+    }
+    progress = advanceFeedProgress(progress, newUrls.length, freshAdded)
     await page.locator(SELECTORS.feed).evaluate((el) => el.scrollBy(0, el.scrollHeight))
-    await page.waitForTimeout(1500)
+    await waitForFeedGrowth(page, links.length)
   }
-  return [...seen].slice(0, maxResults)
+  return fresh
 }
 
 async function textOrEmpty(page: Page, selector: string): Promise<string> {
@@ -81,45 +150,103 @@ async function scrapeDetail(page: Page, url: string, keyword: string, location: 
   return b
 }
 
+export interface MapsSession {
+  scrape(
+    keyword: string, location: string, settings: JobSettings,
+    onRow: OnRow, signal?: AbortSignal, viewport?: Viewport,
+  ): Promise<Business[]>
+  /** Resolves when queued enrichment work has finished. */
+  drain(): Promise<void>
+  /** Drops queued enrichment and closes the browser. Safe on abort. */
+  close(): Promise<void>
+}
+
+/**
+ * One browser for the whole job (story 06) — the old per-task launch paid a
+ * cold start plus consent dismissal for every grid tile, pure overhead at
+ * 100+ tiles. Enrichment runs through a small pool against third-party sites
+ * while google.com navigation stays strictly serial with randomized delays.
+ */
+export async function createMapsSession(settings: JobSettings, isKnown: IsKnown = () => false): Promise<MapsSession> {
+  const browser: Browser = await chromium.launch({ headless: settings.headless })
+  const ctx: BrowserContext = await browser.newContext({ userAgent: UA, locale: 'en-US' })
+  const pool = new EnrichPool(3)
+
+  async function scrape(
+    keyword: string, location: string, taskSettings: JobSettings,
+    onRow: OnRow, signal?: AbortSignal, viewport?: Viewport,
+  ): Promise<Business[]> {
+    // With a viewport the map itself defines the area, so the location text is omitted —
+    // leaving it in would make Google re-centre on the named place and undo the tiling.
+    const query = viewport ? keyword : `${keyword} ${location}`.trim()
+    const out: Business[] = []
+    const page = await ctx.newPage()
+    try {
+      await page.goto(buildSearchUrl(query, viewport), { waitUntil: 'domcontentloaded' })
+      await dismissConsent(page)
+      await page.waitForSelector(SELECTORS.feed, { timeout: 15000 }).catch(() => {})
+      const urls = await scrollFeed(page, taskSettings.maxResults, isKnown, signal)
+      for (const url of urls) {
+        if (signal?.aborted) break
+        const b = await scrapeDetail(page, url, keyword, location)
+        if (b.name) {
+          out.push(b)
+          // Emit with GMB data immediately — the budget counts it, the user
+          // sees it; enrichment lands later as a merge update.
+          onRow(b)
+          if ((taskSettings.extractEmail || taskSettings.findOwner) && b.website) {
+            pool.push(async () => {
+              const site = await scrapeWebsite(ctx, b.website, { findOwner: taskSettings.findOwner }, signal)
+              onRow({
+                ...b,
+                email: site.email,
+                facebook: site.socials.facebook, instagram: site.socials.instagram,
+                twitter: site.socials.twitter, linkedin: site.socials.linkedin,
+                youtube: site.socials.youtube, tiktok: site.socials.tiktok,
+                yelp: site.socials.yelp, yellowpages: site.socials.yellowpages,
+                ownerName: site.ownerName, ownerTitle: site.ownerTitle, ownerSource: site.ownerSource,
+              }, true)
+            })
+          }
+        }
+        // Politeness delay only after a real navigation — skipped known URLs cost zero.
+        await delay(taskSettings.delayMinMs, taskSettings.delayMaxMs)
+      }
+    } finally {
+      await page.close().catch(() => {})
+    }
+    return out
+  }
+
+  return {
+    scrape,
+    drain: () => pool.drain(),
+    close: async () => {
+      pool.abort()
+      await browser.close()
+    },
+  }
+}
+
+/**
+ * One-shot convenience (and the live smoke test's entry point): a session for a
+ * single search, drained and closed.
+ */
 export async function scrapeMaps(
   keyword: string,
   location: string,
   settings: JobSettings,
-  onRow: (b: Business) => void,
+  onRow: OnRow,
   signal?: AbortSignal,
   viewport?: Viewport,
+  isKnown: IsKnown = () => false,
 ): Promise<Business[]> {
-  // With a viewport the map itself defines the area, so the location text is omitted —
-  // leaving it in would make Google re-centre on the named place and undo the tiling.
-  const query = viewport ? keyword : `${keyword} ${location}`.trim()
-  const browser: Browser = await chromium.launch({ headless: settings.headless })
-  const out: Business[] = []
+  const session = await createMapsSession(settings, isKnown)
   try {
-    const ctx = await browser.newContext({ userAgent: UA, locale: 'en-US' })
-    const page = await ctx.newPage()
-    await page.goto(buildSearchUrl(query, viewport), { waitUntil: 'domcontentloaded' })
-    await dismissConsent(page)
-    await page.waitForSelector(SELECTORS.feed, { timeout: 15000 }).catch(() => {})
-    const urls = await scrollFeed(page, settings.maxResults, signal)
-    for (const url of urls) {
-      if (signal?.aborted) break
-      const b = await scrapeDetail(page, url, keyword, location)
-      // Open the business website to pull email + socials (+ owner if requested).
-      if ((settings.extractEmail || settings.findOwner) && b.website) {
-        try {
-          const site = await scrapeWebsite(ctx as BrowserContext, b.website, { findOwner: settings.findOwner }, signal)
-          b.email = site.email
-          b.facebook = site.socials.facebook; b.instagram = site.socials.instagram; b.twitter = site.socials.twitter
-          b.linkedin = site.socials.linkedin; b.youtube = site.socials.youtube; b.tiktok = site.socials.tiktok
-          b.yelp = site.socials.yelp; b.yellowpages = site.socials.yellowpages
-          b.ownerName = site.ownerName; b.ownerTitle = site.ownerTitle; b.ownerSource = site.ownerSource
-        } catch { /* website unreachable — keep GMB data */ }
-      }
-      if (b.name) { out.push(b); onRow(b) }
-      await delay(settings.delayMinMs, settings.delayMaxMs)
-    }
+    const rows = await session.scrape(keyword, location, settings, onRow, signal, viewport)
+    await session.drain()
+    return rows
   } finally {
-    await browser.close()
+    await session.close()
   }
-  return out
 }
