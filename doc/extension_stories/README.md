@@ -22,6 +22,7 @@ Sequential, each ships a working increment. Source docs: `../CHROME_EXTENSION_PR
 | 14 | [Dial-list filters](14-dial-list-filters.md) | Composable criteria: line type, website, reviews, rating, stage/outcome |
 | 15 | [Call recording](15-call-recording.md) | Opt-in local recording per call, filename logged into the row's Notes |
 | 16 | [Recording keep/discard](16-recording-discard.md) | Discard button on S5 + auto-discard for calls under a minimum duration |
+| 17 | [Settings page UI](17-settings-page-ui.md) | Options page reorganised: section cards, switches, recording step chain |
 
 Dependency shape: 00 → 01 → 02 → {03, 04} → 05; 06 is independent after 00; 07 needs 04+06;
 08/09 need 07; 10 needs 09; 11 last.

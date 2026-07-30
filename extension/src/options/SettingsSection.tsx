@@ -7,13 +7,36 @@ import {
 } from '../shared/storage'
 import type { DialFilter, Settings } from '../shared/storage'
 
+type MicState = 'granted' | 'denied' | 'prompt'
+
 /** Dialer settings (story 11). Values clamp to SETTINGS_BOUNDS on save. */
 export function SettingsSection() {
   const [settings, setSettings] = useState<Settings | null>(null)
+  const [mic, setMic] = useState<MicState | null>(null)
 
   useEffect(() => {
     void settingsStore.get().then(setSettings)
+    // The offscreen recorder CANNOT show a permission prompt — getUserMedia
+    // auto-rejects there unless mic access was already granted from a visible
+    // extension page. This page is where that one-time grant happens.
+    void navigator.permissions
+      .query({ name: 'microphone' as PermissionName })
+      .then((p) => {
+        setMic(p.state as MicState)
+        p.onchange = () => setMic(p.state as MicState)
+      })
+      .catch(() => setMic('prompt'))
   }, [])
+
+  async function grantMic() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      stream.getTracks().forEach((t) => t.stop())
+      setMic('granted')
+    } catch {
+      setMic('denied')
+    }
+  }
 
   if (!settings) return null
 
@@ -90,6 +113,27 @@ export function SettingsSection() {
           )}
         />
       </label>
+
+      <div className="setting-row">
+        <span>
+          Microphone access — required once, from this page (Chrome cannot ask
+          during a call; without it every recording fails)
+        </span>
+        {mic === 'granted' ? (
+          <span className="status-line ok">✓ Granted</span>
+        ) : (
+          <button className="btn secondary" onClick={() => void grantMic()}>
+            {mic === 'denied' ? 'Blocked — click to retry' : 'Enable microphone'}
+          </button>
+        )}
+      </div>
+      {mic === 'denied' && (
+        <p className="error-text">
+          Chrome has the microphone blocked for this extension. Click the
+          camera/mic icon in the address bar (or Site settings) to allow it,
+          then retry.
+        </p>
+      )}
 
       <label className="setting-row">
         <span>

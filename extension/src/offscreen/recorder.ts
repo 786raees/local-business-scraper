@@ -40,6 +40,9 @@ async function start(streamId: string): Promise<OffscreenReply> {
   }
 
   const ctx = new AudioContext()
+  // Offscreen documents have no user gesture — the context can start
+  // suspended, which would record silence and mute the loopback.
+  if (ctx.state === 'suspended') void ctx.resume().catch(() => {})
   const tabSrc = ctx.createMediaStreamSource(tab)
   // tabCapture mutes the captured tab — loop it back to the speakers or the
   // caller goes deaf mid-call (story 15 decision 3 trap).
